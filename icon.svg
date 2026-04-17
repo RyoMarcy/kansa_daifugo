@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#1a6b3c" rx="32"/>
+  <!-- 左のカード -->
+  <rect x="18" y="28" width="76" height="108" fill="white" rx="10"/>
+  <!-- 右のカード -->
+  <rect x="106" y="28" width="76" height="108" fill="white" rx="10"/>
+  <!-- スペード -->
+  <text x="56" y="100" font-size="56" text-anchor="middle" fill="#1a1a1a" font-family="serif">♠</text>
+  <!-- ハート -->
+  <text x="144" y="100" font-size="56" text-anchor="middle" fill="#cc0000" font-family="serif">♥</text>
+  <!-- ランク -->
+  <text x="26" y="52" font-size="18" fill="#1a1a1a" font-family="serif" font-weight="bold">A</text>
+  <text x="114" y="52" font-size="18" fill="#cc0000" font-family="serif" font-weight="bold">2</text>
+  <!-- 大富豪 -->
+  <text x="100" y="168" font-size="24" text-anchor="middle" fill="#ffd700"
+        font-weight="bold" font-family="sans-serif">大富豪</text>
+</svg>

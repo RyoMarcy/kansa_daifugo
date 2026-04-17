@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a6b3c">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="大富豪">
+  <title>大富豪</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ステータスバー -->
+    <div id="status-bar">
+      <div id="game-message">大富豪へようこそ！</div>
+      <div id="round-indicator"></div>
+    </div>
+
+    <!-- 場 -->
+    <div id="field">
+      <div id="field-cards"></div>
+      <div id="field-info"></div>
+      <div id="lock-display" class="hidden"></div>
+      <div id="revolution-badge" class="hidden">革命中！</div>
+    </div>
+
+    <!-- CPU プレイヤー -->
+    <div id="cpu-area">
+      <div class="cpu-player" id="cpu1">
+        <div class="cpu-label">CPU1</div>
+        <div class="cpu-hand" id="cpu1-hand"></div>
+        <div class="cpu-count" id="cpu1-count"></div>
+      </div>
+      <div class="cpu-player" id="cpu2">
+        <div class="cpu-label">CPU2</div>
+        <div class="cpu-hand" id="cpu2-hand"></div>
+        <div class="cpu-count" id="cpu2-count"></div>
+      </div>
+      <div class="cpu-player" id="cpu3">
+        <div class="cpu-label">CPU3</div>
+        <div class="cpu-hand" id="cpu3-hand"></div>
+        <div class="cpu-count" id="cpu3-count"></div>
+      </div>
+    </div>
+
+    <!-- プレイヤー手札 -->
+    <div id="player-area">
+      <div id="player-hand-area">
+        <div id="player-label">あなた</div>
+        <div id="player-hand"></div>
+      </div>
+      <div id="action-area">
+        <button id="btn-play" onclick="playCards()" disabled>出す</button>
+        <button id="btn-pass" onclick="pass()" disabled>パス</button>
+      </div>
+    </div>
+
+    <!-- 特殊効果モーダル -->
+    <div id="effect-modal" class="hidden">
+      <div id="effect-modal-box">
+        <h3 id="effect-modal-title"></h3>
+        <p id="effect-modal-desc"></p>
+        <div id="effect-modal-cards"></div>
+        <div id="effect-modal-footer">
+          <span id="effect-modal-count"></span>
+          <button id="effect-modal-confirm" onclick="confirmEffect()">決定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 特殊効果フラッシュ通知 -->
+    <div id="effect-notice" class="hidden"></div>
+
+    <!-- ゲーム開始/終了オーバーレイ -->
+    <div id="overlay" class="hidden">
+      <div id="overlay-content">
+        <h2 id="overlay-title">大富豪</h2>
+        <div id="overlay-result"></div>
+        <!-- 周回選択 -->
+        <div id="round-selector">
+          <p class="round-selector-label">何周プレイしますか？</p>
+          <div id="round-btns">
+            <button class="round-btn" onclick="selectRounds(1)">1周</button>
+            <button class="round-btn" onclick="selectRounds(2)">2周</button>
+            <button class="round-btn" onclick="selectRounds(3)">3周</button>
+            <button class="round-btn" onclick="selectRounds(4)">4周</button>
+          </div>
+        </div>
+        <button id="overlay-action-btn" class="hidden" onclick="overlayAction()">ゲーム開始</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
