@@ -33,9 +33,9 @@ let state = {
   passCount: 0,
   revolution: false,
   elevenBack: false,
-  skipNext: false,
+  skipNext: 0,
   numberLock: null,
-  suitLock: null,
+  suitLock: [],          // 縛りスートの配列（空=縛りなし、複数可）
   roundStarter: null,   // このラウンドの最初のプレイヤー
   trickStarter: null,   // 現在の場を最初に出したプレイヤー
   finishRanks: [],
@@ -181,7 +181,7 @@ function resetField() {
   state.passCount = 0;
   state.elevenBack = false;
   state.numberLock = null;
-  state.suitLock = null;
+  state.suitLock = [];
   state.trickStarter = null;
 }
 
@@ -192,11 +192,9 @@ function updateLocks(prevField, newCards) {
     return;
   }
 
+  // ---- 数字縛り（連続ランク） ----
   const prevRank = getMainRank(prevField);
-  const prevSuit = getMainSuit(prevField);
   const newRank  = getMainRank(newCards);
-  const newSuit  = getMainSuit(newCards);
-
   if (prevRank && newRank && RANK_ORDER[newRank] === RANK_ORDER[prevRank] + 1) {
     const nextVal = RANK_ORDER[newRank] + 1;
     state.numberLock = RANK_BY_VAL[nextVal] || null;
@@ -204,8 +202,15 @@ function updateLocks(prevField, newCards) {
     state.numberLock = null;
   }
 
-  if (!state.suitLock && prevSuit && newSuit && prevSuit === newSuit) {
-    state.suitLock = newSuit;
+  // ---- スート縛り（両場に共通するスートをすべて縛る） ----
+  // 複数枚でも「前の場のスート集合 ∩ 今のスート集合」が1つ以上あれば全部縛る
+  if (state.suitLock.length === 0) {
+    const prevSuits = new Set(prevField.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+    const newSuits  = new Set(newCards.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+    const common = [...prevSuits].filter(s => newSuits.has(s));
+    if (common.length >= 1) {
+      state.suitLock = common;   // 配列で保持
+    }
   }
 }
 
@@ -232,7 +237,7 @@ function startRound() {
 
   state = {
     players: ['あなた','CPU1','CPU2','CPU3'].map((name, i) => ({
-      id: i, name, hand: [], isHuman: i === 0, finished: false, rank: null,
+      id: i, name, hand: [], isHuman: i === 0, finished: false, stuck: false, rank: null,
     })),
     field: [],
     discardPile: [],
@@ -240,9 +245,9 @@ function startRound() {
     passCount: 0,
     revolution: false,
     elevenBack: false,
-    skipNext: false,
+    skipNext: 0,
     numberLock: null,
-    suitLock: null,
+    suitLock: [],
     roundStarter: null,
     trickStarter: null,
     finishRanks: [],
@@ -355,11 +360,8 @@ function isCardPotentiallyPlayable(card) {
   const hand = state.players[0].hand;
   const fieldLen = state.field.length;
 
-  // 縛りチェック（ジョーカーは縛り免除）
-  if (card.rank !== 'JOKER') {
-    if (state.numberLock && card.rank !== state.numberLock) return false;
-    if (state.suitLock  && card.suit  !== state.suitLock)  return false;
-  }
+  // 数字縛りチェック（ジョーカーは免除）
+  if (card.rank !== 'JOKER' && state.numberLock && card.rank !== state.numberLock) return false;
 
   if (fieldLen === 0) return true;
 
@@ -382,15 +384,32 @@ function isCardPotentiallyPlayable(card) {
 
   // ---- 場がグループの場合 ----
   const joker = hand.find(c => c.rank === 'JOKER');
-  const jokerStrong = joker && cardValue(joker) > fldStrength;
-  const cardStrong  = cardValue(card) > fldStrength;
+  const cardStrong = cardValue(card) > fldStrength;
+  // グループ出しではジョーカーは「同ランク扱い」なので、このカード自身の強さで判定する
+  // （ジョーカーが場の強さを超えていても、このカードが弱ければ出せない）
+  if (!cardStrong) return false;
 
-  if (!cardStrong && !jokerStrong) return false;
-  if (fieldLen === 1) return true;
+  // 1枚出し：このカード自身がすべての縛りスートを満たす必要がある
+  if (fieldLen === 1) {
+    if (state.suitLock.length > 0 && !state.suitLock.includes(card.suit)) return false;
+    return true;
+  }
 
-  // 複数枚：(fieldLen-1) 枚の同ランク or ジョーカーで組が組めるか
+  // 複数枚出し：このカードを含む組が縛りスートをすべてカバーできるかチェック
+  // 新ルール：各縛りスートが組の中に少なくとも1枚含まれていれば出せる
+  if (state.suitLock.length > 0) {
+    const uncoveredLocks = state.suitLock.filter(s => s !== card.suit);
+    // パートナーのスロット数が足りないと縛りを満たせない
+    if (uncoveredLocks.length > fieldLen - 1) return false;
+    // 未カバーの各縛りスートに対して、同ランクのパートナーが存在するか
+    for (const lockSuit of uncoveredLocks) {
+      if (!hand.some(c => c.id !== card.id && c.rank === card.rank && c.suit === lockSuit)) return false;
+    }
+  }
+
+  // 同ランクのパートナー枚数（縛りスート外も含めてカウント）
   const sameRankOthers = hand.filter(c => c.rank === card.rank && c.id !== card.id).length;
-  const jokerAvail     = joker ? 1 : 0;
+  const jokerAvail = joker ? 1 : 0;
   return sameRankOthers + jokerAvail >= fieldLen - 1;
 }
 
@@ -399,8 +418,10 @@ function canPlay(selected) {
   if (state.numberLock) {
     if (selected.filter(c => c.rank !== 'JOKER').some(c => c.rank !== state.numberLock)) return false;
   }
-  if (state.suitLock) {
-    if (selected.filter(c => c.rank !== 'JOKER').some(c => c.suit !== state.suitLock)) return false;
+  if (state.suitLock.length > 0) {
+    // 各縛りスートが選択カードに少なくとも1枚含まれているか（ジョーカーはスートなしで免除）
+    const nonJokers = selected.filter(c => c.rank !== 'JOKER');
+    if (state.suitLock.some(s => !nonJokers.some(c => c.suit === s))) return false;
   }
   const fieldLen = state.field.length;
   if (fieldLen === 0) return isValidSet(selected);
@@ -433,7 +454,26 @@ function isValidSet(cards) {
 }
 
 function maxStrength(cards) {
-  return Math.max(...cards.map(c => cardValue(c)));
+  // ジョーカー単体ならそのまま
+  // グループ出しにジョーカーが含まれる場合、ジョーカーは「同ランク扱い」なので
+  // 非ジョーカーの強さで決まる（getFieldStrength と同じ方針）
+  const nj = cards.filter(c => c.rank !== 'JOKER');
+  if (nj.length === 0) return cardValue(cards[0]); // ジョーカーのみ
+  return Math.max(...nj.map(c => cardValue(c)));
+}
+
+// 「最後に出し禁止」カードか判定（２、革命中は３、ジョーカーは常時）
+function isFinishForbiddenCard(card) {
+  if (card.rank === 'JOKER') return true;
+  const reversed = state.revolution !== state.elevenBack;
+  return reversed ? card.rank === '3' : card.rank === '2';
+}
+
+// この出し手が「上がり禁止」の組み合わせか（手札が空になり、かつ禁止カードを含む）
+function isForbiddenFinish(playerIdx, cards) {
+  const hand = state.players[playerIdx].hand;
+  if (hand.length !== cards.length) return false;        // 上がりにならない
+  return cards.some(c => isFinishForbiddenCard(c));
 }
 
 // ===================== プレイヤー操作 =====================
@@ -447,15 +487,20 @@ function toggleCard(cardId) {
   if (idx === -1) selectedCards.push(cardId);
   else selectedCards.splice(idx, 1);
   renderPlayerHand();
-  document.getElementById('btn-play').disabled = !canPlay(
-    selectedCards.map(id => state.players[0].hand.find(c => c.id === id))
-  );
+  const selected = selectedCards.map(id => state.players[0].hand.find(c => c.id === id));
+  document.getElementById('btn-play').disabled =
+    !canPlay(selected) || isForbiddenFinish(0, selected);
 }
 
 function playCards() {
   const player = state.players[state.currentPlayer];
   const cards = selectedCards.map(id => player.hand.find(c => c.id === id));
   if (!canPlay(cards)) { setMessage('そのカードは出せません'); return; }
+  if (isForbiddenFinish(state.currentPlayer, cards)) {
+    const reversed = state.revolution !== state.elevenBack;
+    setMessage(`${reversed ? '３' : '２'}・ジョーカーでは上がれません！`);
+    return;
+  }
   doPlay(state.currentPlayer, cards);
 }
 
@@ -540,31 +585,95 @@ function afterEffect(playerIdx, samePlayer) {
   }
 }
 
+// 現時点で使われていないランクのうち最上位（小さい数字）を返す
+function nextAvailableRankFromTop() {
+  const used = new Set(state.players.filter(p => p.finished).map(p => p.rank));
+  return [0, 1, 2, 3].find(r => !used.has(r)) ?? 0;
+}
+
 function checkFinish(playerIdx) {
   const player = state.players[playerIdx];
   if (player.hand.length > 0 || player.finished) return false;
 
   player.finished = true;
-  player.rank = state.finishRanks.length;
+  player.rank = nextAvailableRankFromTop();   // ← 空きランクの最上位を割り当て
   state.finishRanks.push(playerIdx);
   setMessage(`${player.name}が上がった！ → ${RANK_NAMES[player.rank]}`);
 
   if (state.finishRanks.length >= 3) {
     const last = state.players.find(p => !p.finished);
-    if (last) { last.finished = true; last.rank = 3; state.finishRanks.push(last.id); }
+    if (last) {
+      last.finished = true;
+      last.rank = nextAvailableRankFromTop();  // 残り1枠
+      state.finishRanks.push(last.id);
+    }
     endRound();
     return true;
   }
   return false;
 }
 
+// 手札が禁止上がりカードのみのプレイヤーを下位ランクから確定させる
+function checkForbiddenStuck() {
+  // 手札が残り1枚でそれが禁止カードのときだけ確定する
+  // （複数枚ある場合は他を先に出せる可能性があるため確定しない）
+  const stuck = state.players.filter(p =>
+    !p.finished &&
+    p.hand.length === 1 &&
+    isFinishForbiddenCard(p.hand[0])
+  );
+  if (stuck.length === 0) return false;
+
+  // 最下位（大貧民=3）から順に割り当て
+  const worstFirst = [3, 2, 1, 0];
+  stuck.forEach(player => {
+    const used = new Set(state.players.filter(p => p.finished).map(p => p.rank));
+    const rank = worstFirst.find(r => !used.has(r));
+    if (rank === undefined) return;
+    player.finished = true;
+    player.stuck = true;
+    player.rank = rank;
+    state.finishRanks.push(player.id);
+  });
+
+  const names = stuck.map(p => `${p.name}→${RANK_NAMES[p.rank]}`).join('、');
+  setMessage(`禁止カードのみ！ ${names} 確定`);
+
+  // 3人以上確定 → 残り1人のランクも確定してラウンド終了
+  if (state.finishRanks.length >= 3) {
+    const last = state.players.find(p => !p.finished);
+    if (last) {
+      last.finished = true;
+      last.rank = nextAvailableRankFromTop();
+      state.finishRanks.push(last.id);
+    }
+    render();
+    endRound();
+    return true;
+  }
+
+  render();
+  return false;
+}
+
 function nextTurn() {
+  if (checkForbiddenStuck()) return;
   let next = getNextActivePlayer(state.currentPlayer);
-  if (state.skipNext) {
-    state.skipNext = false;
+  while (state.skipNext > 0) {
+    state.skipNext--;
     const skipped = state.players[next];
     if (!skipped.finished) {
-      setMessage(`${skipped.name}をスキップ！`);
+      // スキップもパスと同等にカウント（場のリセット判定に使う）
+      state.passCount++;
+      const activePlayers = state.players.filter(p => !p.finished).length;
+      if (state.passCount >= activePlayers - 1) {
+        state.skipNext = 0; // 残りスキップをキャンセルして場リセット
+        resetField();
+        setMessage(`${skipped.name}をスキップ！場をリセット！`);
+        break;
+      } else {
+        setMessage(`${skipped.name}をスキップ！`);
+      }
       next = getNextActivePlayer(next);
     }
   }
@@ -612,13 +721,18 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
       break;
     }
     case '5': {
-      state.skipNext = true;
-      setMessage(`${player.name}がスキップ！次の人を飛ばす`);
+      state.skipNext = count; // 出した枚数分スキップ
+      const skipMsg = count === 1 ? '次の1人を飛ばす' : `次の${count}人を飛ばす`;
+      setMessage(`${player.name}がスキップ！${skipMsg}`);
       done(false); break;
     }
     case '6': {
-      const suit = nonJokers.length > 0 ? nonJokers[0].suit : null;
-      if (suit) { state.suitLock = suit; setMessage(`${player.name}が強制縛り！${suit}のみ出せる`); render(); }
+      const suits = [...new Set(nonJokers.map(c => c.suit))];
+      if (suits.length > 0) {
+        state.suitLock = suits;
+        setMessage(`${player.name}が強制縛り！${suits.join('')}のみ出せる`);
+        render();
+      }
       done(false); break;
     }
     case '7': {
@@ -767,7 +881,23 @@ function cpuTurn() {
   if (player.isHuman || player.finished) return;
 
   const fieldLen = state.field.length;
-  const played = fieldLen === 0 ? findPlayableFromEmpty(player.hand) : findPlayable(player.hand, fieldLen);
+  let played = fieldLen === 0 ? findPlayableFromEmpty(player.hand) : findPlayable(player.hand, fieldLen);
+
+  // 詰み回避：手札が [禁止, 通常] の2枚のとき、禁止カードを先に出せるなら優先する
+  // （禁止カードを先に出せば、次のターンで通常カードで正常上がりできる）
+  if (player.hand.length === 2) {
+    const forbidden = player.hand.filter(c => isFinishForbiddenCard(c));
+    const normal    = player.hand.filter(c => !isFinishForbiddenCard(c));
+    if (forbidden.length === 1 && normal.length === 1 && canPlay(forbidden)) {
+      played = forbidden;
+    }
+  }
+
+  // 禁止上がりになる場合は必ずパス
+  // （手札が1枚で禁止カードのみの場合は nextTurn() 冒頭の checkForbiddenStuck で処理済み）
+  if (played && isForbiddenFinish(state.currentPlayer, played)) {
+    played = null;
+  }
 
   if (played) {
     const nj = played.filter(c => c.rank !== 'JOKER');
@@ -781,7 +911,7 @@ function cpuTurn() {
 
 function findPlayableFromEmpty(hand) {
   let candidates = hand;
-  if (state.suitLock)   candidates = candidates.filter(c => c.rank === 'JOKER' || c.suit === state.suitLock);
+  if (state.suitLock.length > 0)   candidates = candidates.filter(c => c.rank === 'JOKER' || state.suitLock.includes(c.suit));
   if (state.numberLock) candidates = candidates.filter(c => c.rank === 'JOKER' || c.rank === state.numberLock);
   if (candidates.length === 0) return hand.length > 0 ? [hand[0]] : null;
 
@@ -801,7 +931,7 @@ function findPlayableFromEmpty(hand) {
   }
 
   // 縛りがない場合、弱い階段があれば出す
-  if (!state.numberLock && !state.suitLock) {
+  if (!state.numberLock && state.suitLock.length === 0) {
     const seqs = findAllSequences(nonJokers);
     if (seqs.length > 0) {
       seqs.sort((a, b) => a.length - b.length || maxStrength(a) - maxStrength(b));
@@ -824,7 +954,6 @@ function findPlayable(hand, count) {
   }
 
   let available = hand;
-  if (state.suitLock) available = available.filter(c => c.rank === 'JOKER' || c.suit === state.suitLock);
   if (state.numberLock) available = available.filter(c => c.rank === 'JOKER' || c.rank === state.numberLock);
 
   if (count === 1) {
@@ -833,11 +962,14 @@ function findPlayable(hand, count) {
       const s3 = hand.find(c => c.suit === '♠' && c.rank === '3');
       return s3 ? [s3] : null;
     }
-    const candidates = available.filter(c => cardValue(c) > fldStrength);
+    // 1枚出しは縛りスート内のカードのみ対象
+    let candidates = available.filter(c => cardValue(c) > fldStrength);
+    if (state.suitLock.length > 0) candidates = candidates.filter(c => c.rank === 'JOKER' || state.suitLock.includes(c.suit));
     if (candidates.length === 0) return null;
     return [candidates.sort((a,b) => cardValue(a)-cardValue(b))[0]];
   }
 
+  // 複数枚出し：縛りスート外カードも候補に含め、グループとして縛りをカバーできれば採用
   const groups = {};
   available.filter(c => c.rank !== 'JOKER').forEach(c => {
     const v = cardValue(c);
@@ -847,6 +979,19 @@ function findPlayable(hand, count) {
   const jokers = available.filter(c => c.rank === 'JOKER');
   for (const [v, cards] of Object.entries(groups).sort((a,b) => Number(a[0])-Number(b[0]))) {
     if (Number(v) <= fldStrength) continue;
+    const total = cards.length + jokers.length;
+    if (total < count) continue;
+    // 縛りがある場合：縛りスートを優先して選択し、全縛りスートをカバーできるか確認
+    if (state.suitLock.length > 0) {
+      const inLock = cards.filter(c => state.suitLock.includes(c.suit));
+      const coveredSuits = new Set(inLock.map(c => c.suit));
+      if (!state.suitLock.every(s => coveredSuits.has(s))) continue; // 縛りをカバーできない
+      // 縛りスートのカードを優先し、残りを任意のカードで埋める
+      const notInLock = cards.filter(c => !state.suitLock.includes(c.suit));
+      const selection = [...inLock, ...notInLock, ...jokers].slice(0, count);
+      if (selection.length === count) return selection;
+      continue;
+    }
     if (cards.length >= count) return cards.slice(0, count);
     if (cards.length + jokers.length >= count) return [...cards, ...jokers].slice(0, count);
   }
@@ -1009,7 +1154,7 @@ function renderField() {
 
   const lockParts = [];
   if (state.numberLock) lockParts.push(`数字縛り: ${state.numberLock}`);
-  if (state.suitLock)   lockParts.push(`スート縛り: ${state.suitLock}`);
+  if (state.suitLock.length > 0) lockParts.push(`スート縛り: ${state.suitLock.join('')}`);
   const lockEl = document.getElementById('lock-display');
   if (lockEl) {
     lockEl.textContent = lockParts.join('　');
@@ -1038,6 +1183,7 @@ function renderCPUs() {
     countEl.textContent = `${p.hand.length}枚`;
     playerEl.classList.toggle('active-turn', state.currentPlayer === i && !state.gameOver);
     playerEl.classList.toggle('finished', p.finished);
+    playerEl.classList.toggle('stuck', p.stuck);
 
     // 親マーク
     const isRoundStarter = state.roundStarter === i;
@@ -1046,7 +1192,8 @@ function renderCPUs() {
     const prevTitle = gameConfig.prevRanks
       ? `(${RANK_NAMES[gameConfig.prevRanks[i]] ?? ''})` : '';
     const parentMark = isRoundStarter ? ' 👑' : (isTrickStarter ? ' ◆' : '');
-    labelEl.textContent = `CPU${i}${prevTitle}${parentMark}`;
+    const finishMark = p.stuck ? ' [詰]' : (p.finished ? ' ✓' : '');
+    labelEl.textContent = `CPU${i}${prevTitle}${parentMark}${finishMark}`;
   });
 }
 
@@ -1057,7 +1204,9 @@ function renderPlayerArea() {
   const isRoundStarter = state.roundStarter === 0;
   const isTrickStarter = state.trickStarter === 0;
   const parentMark = isRoundStarter ? ' 👑' : (isTrickStarter ? ' ◆' : '');
-  document.getElementById('player-label').textContent = `あなた${parentMark}`;
+  const player = state.players[0];
+  const finishMark = player.stuck ? ' [詰]' : (player.finished ? ' ✓' : '');
+  document.getElementById('player-label').textContent = `あなた${parentMark}${finishMark}`;
 }
 
 function renderPlayerHand() {
@@ -1069,21 +1218,27 @@ function renderPlayerHand() {
   player.hand.forEach(card => {
     const cardEl = makeCardEl(card, false);
     if (selectedCards.includes(card.id)) cardEl.classList.add('selected');
-
     if (newCardIds.has(card.id)) cardEl.classList.add('card-new');
-    const playable = isCardPotentiallyPlayable(card);
-    if (!playable) cardEl.classList.add('locked-out');
 
     if (isMyTurn) {
-      cardEl.onclick = () => toggleCard(card.id);
-      if (!playable) cardEl.style.cursor = 'not-allowed';
+      // 自分のターン中だけ出せる/出せないを明暗で表示
+      const playable = isCardPotentiallyPlayable(card);
+      if (!playable) {
+        cardEl.classList.add('locked-out');
+        cardEl.style.cursor = 'not-allowed';
+      } else {
+        cardEl.onclick = () => toggleCard(card.id);
+      }
     }
 
-    if (EFFECT_INFO[card.rank]) {
+    const effectInfo = card.suit === '♠' && card.rank === '3'
+      ? { name: 'スペ３', color: '#8e44ad' }
+      : EFFECT_INFO[card.rank];
+    if (effectInfo) {
       const badge = document.createElement('div');
       badge.className = 'effect-badge';
-      badge.textContent = EFFECT_INFO[card.rank].name;
-      badge.style.background = EFFECT_INFO[card.rank].color;
+      badge.textContent = effectInfo.name;
+      badge.style.background = effectInfo.color;
       cardEl.appendChild(badge);
     }
     el.appendChild(cardEl);

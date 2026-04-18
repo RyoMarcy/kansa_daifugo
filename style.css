@@ -140,10 +140,7 @@ body {
   margin-top: 4px;
 }
 
-.cpu-player.finished .cpu-label::after {
-  content: ' ✓';
-  color: #2ecc71;
-}
+/* ✓ / [詰] は JS で textContent に直接埋め込むため ::after は使わない */
 
 /* プレイヤーエリア */
 #player-area {
