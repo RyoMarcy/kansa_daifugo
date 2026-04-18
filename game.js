@@ -113,6 +113,68 @@ function getMainSuit(cards) {
   return nj.every(c => c.suit === s) ? s : null;
 }
 
+// ===================== 階段ヘルパー =====================
+// 階段判定（3枚以上、同スート、連続ランク、ジョーカー不可）
+function isSequence(cards) {
+  if (cards.length < 3) return false;
+  if (cards.some(c => c.rank === 'JOKER')) return false;
+  const suit = cards[0].suit;
+  if (!cards.every(c => c.suit === suit)) return false;
+  const vals = cards.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] !== vals[i - 1] + 1) return false;
+  }
+  return true;
+}
+
+// このカードを含む、seqLen枚の同スート連続セットが手札にあり、かつ強さがminStrengthを超えるか
+function canBeInSequence(card, hand, seqLen, minStrength) {
+  if (card.rank === 'JOKER') return false;
+  const suit = card.suit;
+  const cardVal = RANK_ORDER[card.rank];
+  const suitVals = new Set(
+    hand.filter(c => c.suit === suit && c.rank !== 'JOKER').map(c => RANK_ORDER[c.rank])
+  );
+  for (let start = Math.max(3, cardVal - seqLen + 1); start <= cardVal && start + seqLen - 1 <= 15; start++) {
+    const end = start + seqLen - 1;
+    let ok = true;
+    for (let v = start; v <= end; v++) {
+      if (!suitVals.has(v)) { ok = false; break; }
+    }
+    if (ok) {
+      let seqMax = -Infinity;
+      for (let v = start; v <= end; v++) {
+        const rank = RANK_BY_VAL[v];
+        if (rank) seqMax = Math.max(seqMax, cardValue({ rank, suit }));
+      }
+      if (seqMax > minStrength) return true;
+    }
+  }
+  return false;
+}
+
+// 手札から全ての階段候補（minLen枚以上）を列挙
+function findAllSequences(hand, minLen = 3) {
+  const result = [];
+  for (const suit of SUITS) {
+    const sc = hand.filter(c => c.suit === suit && c.rank !== 'JOKER')
+      .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank]);
+    let i = 0;
+    while (i < sc.length) {
+      let j = i;
+      while (j + 1 < sc.length && RANK_ORDER[sc[j + 1].rank] === RANK_ORDER[sc[j].rank] + 1) j++;
+      const runLen = j - i + 1;
+      if (runLen >= minLen) {
+        for (let s = i; s <= j; s++)
+          for (let e = s + minLen - 1; e <= j; e++)
+            result.push(sc.slice(s, e + 1));
+      }
+      i = j + 1;
+    }
+  }
+  return result;
+}
+
 function resetField() {
   state.discardPile.push(...state.field);
   state.field = [];
@@ -124,6 +186,12 @@ function resetField() {
 }
 
 function updateLocks(prevField, newCards) {
+  // 階段が絡む場合は縛りを適用しない
+  if (isSequence(prevField) || isSequence(newCards)) {
+    state.numberLock = null;
+    return;
+  }
+
   const prevRank = getMainRank(prevField);
   const prevSuit = getMainSuit(prevField);
   const newRank  = getMainRank(newCards);
@@ -276,17 +344,54 @@ function giveBack(giver, receiver, count, callback) {
 function getFieldStrength() {
   if (state.field.length === 0) return null;
   if (state.field.length === 1 && state.field[0].rank === 'JOKER') return 17;
-  const base = state.field.find(c => c.rank !== 'JOKER');
-  return base ? cardValue(base) : 17;
+  const nj = state.field.filter(c => c.rank !== 'JOKER');
+  if (nj.length === 0) return 17;
+  // 階段は最強カードの値、グループは全員同じ値なので max で統一
+  return Math.max(...nj.map(c => cardValue(c)));
 }
 
 // カード1枚が「そもそも出せる可能性がある」かチェック（ハイライト用）
 function isCardPotentiallyPlayable(card) {
-  if (card.rank === 'JOKER') return true;
-  if (state.numberLock && card.rank !== state.numberLock) return false;
-  if (state.suitLock && card.suit !== state.suitLock) return false;
-  if (state.field.length === 0) return true;
-  return cardValue(card) > getFieldStrength();
+  const hand = state.players[0].hand;
+  const fieldLen = state.field.length;
+
+  // 縛りチェック（ジョーカーは縛り免除）
+  if (card.rank !== 'JOKER') {
+    if (state.numberLock && card.rank !== state.numberLock) return false;
+    if (state.suitLock  && card.suit  !== state.suitLock)  return false;
+  }
+
+  if (fieldLen === 0) return true;
+
+  const fldStrength = getFieldStrength();
+
+  // 特例：場が単体ジョーカーのとき ♠3 だけ光らせる
+  if (fieldLen === 1 && state.field[0].rank === 'JOKER') {
+    return card.suit === '♠' && card.rank === '3';
+  }
+
+  // ジョーカー自身：強さが場を超えるか
+  if (card.rank === 'JOKER') {
+    return cardValue(card) > fldStrength;
+  }
+
+  // ---- 場が階段の場合 ----
+  if (isSequence(state.field)) {
+    return canBeInSequence(card, hand, fieldLen, fldStrength);
+  }
+
+  // ---- 場がグループの場合 ----
+  const joker = hand.find(c => c.rank === 'JOKER');
+  const jokerStrong = joker && cardValue(joker) > fldStrength;
+  const cardStrong  = cardValue(card) > fldStrength;
+
+  if (!cardStrong && !jokerStrong) return false;
+  if (fieldLen === 1) return true;
+
+  // 複数枚：(fieldLen-1) 枚の同ランク or ジョーカーで組が組めるか
+  const sameRankOthers = hand.filter(c => c.rank === card.rank && c.id !== card.id).length;
+  const jokerAvail     = joker ? 1 : 0;
+  return sameRankOthers + jokerAvail >= fieldLen - 1;
 }
 
 function canPlay(selected) {
@@ -299,14 +404,29 @@ function canPlay(selected) {
   }
   const fieldLen = state.field.length;
   if (fieldLen === 0) return isValidSet(selected);
+
+  // 特例：♠3 は単体ジョーカーに勝てる
+  if (fieldLen === 1 && state.field[0].rank === 'JOKER') {
+    return selected.length === 1 && selected[0].suit === '♠' && selected[0].rank === '3';
+  }
+
   if (selected.length !== fieldLen) return false;
   if (!isValidSet(selected)) return false;
+
+  // 階段 vs 階段、グループ vs グループ の一致チェック
+  const fieldIsSeq = isSequence(state.field);
+  const selIsSeq   = isSequence(selected);
+  if (fieldIsSeq !== selIsSeq) return false;
+
   return maxStrength(selected) > getFieldStrength();
 }
 
 function isValidSet(cards) {
   if (cards.length === 0) return false;
   if (cards.length === 1) return true;
+  // 階段判定（3枚以上の同スート連続）
+  if (isSequence(cards)) return true;
+  // グループ判定（同ランク）
   const nj = cards.filter(c => c.rank !== 'JOKER');
   if (nj.length === 0) return true;
   return nj.every(c => c.rank === nj[0].rank);
@@ -366,6 +486,24 @@ function doPlay(playerIdx, cards) {
   if (cards.length === 4 && nonJokers.length >= 1 && nonJokers.every(c => c.rank === nonJokers[0].rank)) {
     state.revolution = !state.revolution;
     showBadgeFlash('革命' + (state.revolution ? '発動！' : '解除！'));
+  }
+
+  // 特例：♠3 が単体ジョーカーを倒した → 場を流して続行
+  if (prevField.length === 1 && prevField[0].rank === 'JOKER' &&
+      cards.length === 1 && cards[0].suit === '♠' && cards[0].rank === '3') {
+    showEffectNotice('スペ3! ジョーカー撃破！', '#8e44ad');
+    resetField();
+    render();
+    if (checkFinish(playerIdx)) return;
+    render();
+    const p = state.players[playerIdx];
+    if (p.isHuman) {
+      enableActions(true);
+      setMessage('♠3でジョーカーを撃破！もう一度あなたのターン');
+    } else {
+      setTimeout(() => cpuTurn(), 900);
+    }
+    return;
   }
 
   updateLocks(prevField, cards);
@@ -647,7 +785,7 @@ function findPlayableFromEmpty(hand) {
   if (state.numberLock) candidates = candidates.filter(c => c.rank === 'JOKER' || c.rank === state.numberLock);
   if (candidates.length === 0) return hand.length > 0 ? [hand[0]] : null;
 
-  const jokers   = candidates.filter(c => c.rank === 'JOKER');
+  const jokers    = candidates.filter(c => c.rank === 'JOKER');
   const nonJokers = candidates.filter(c => c.rank !== 'JOKER');
 
   // ランク別にグループ化（弱い順）
@@ -656,27 +794,45 @@ function findPlayableFromEmpty(hand) {
     if (!groups[c.rank]) groups[c.rank] = [];
     groups[c.rank].push(c);
   });
-
-  const sorted = Object.entries(groups)
-    .sort((a, b) => RANK_ORDER[a[0]] - RANK_ORDER[b[0]]);
-
-  // 最も弱いランクの複数枚グループを探す
+  const sorted = Object.entries(groups).sort((a, b) => RANK_ORDER[a[0]] - RANK_ORDER[b[0]]);
   for (const [, cards] of sorted) {
     const group = [...cards, ...jokers].slice(0, 4);
-    if (group.length >= 2) return group; // ペア以上があれば出す
+    if (group.length >= 2) return group;
   }
 
-  // 複数枚グループなし → 最弱の1枚
+  // 縛りがない場合、弱い階段があれば出す
+  if (!state.numberLock && !state.suitLock) {
+    const seqs = findAllSequences(nonJokers);
+    if (seqs.length > 0) {
+      seqs.sort((a, b) => a.length - b.length || maxStrength(a) - maxStrength(b));
+      return seqs[0];
+    }
+  }
+
   return [candidates[0]];
 }
 
 function findPlayable(hand, count) {
   const fldStrength = getFieldStrength();
+
+  // 場が階段 → 同枚数の階段で上回るものを探す
+  if (isSequence(state.field)) {
+    const seqs = findAllSequences(hand, count)
+      .filter(s => s.length === count && maxStrength(s) > fldStrength);
+    if (seqs.length === 0) return null;
+    return seqs.sort((a, b) => maxStrength(a) - maxStrength(b))[0];
+  }
+
   let available = hand;
   if (state.suitLock) available = available.filter(c => c.rank === 'JOKER' || c.suit === state.suitLock);
   if (state.numberLock) available = available.filter(c => c.rank === 'JOKER' || c.rank === state.numberLock);
 
   if (count === 1) {
+    // 特例：場が単体ジョーカーなら ♠3 で勝てる
+    if (state.field.length === 1 && state.field[0].rank === 'JOKER') {
+      const s3 = hand.find(c => c.suit === '♠' && c.rank === '3');
+      return s3 ? [s3] : null;
+    }
     const candidates = available.filter(c => cardValue(c) > fldStrength);
     if (candidates.length === 0) return null;
     return [candidates.sort((a,b) => cardValue(a)-cardValue(b))[0]];
@@ -860,9 +1016,10 @@ function renderField() {
     lockEl.classList.toggle('hidden', lockParts.length === 0);
   }
 
+  const seqLabel = isSequence(state.field) ? '【階段】' : '';
   document.getElementById('field-info').textContent = state.field.length === 0
     ? '（場は空です）'
-    : `${state.field.length}枚  /  捨て札: ${state.discardPile.length}枚`;
+    : `${seqLabel}${state.field.length}枚  /  捨て札: ${state.discardPile.length}枚`;
 }
 
 function renderCPUs() {
