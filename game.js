@@ -16,6 +16,14 @@ const EFFECT_INFO = {
   'J':  { name: '11バック', color: '#c0392b' },
 };
 
+// スート別の3効果
+const SUIT3_EFFECTS = {
+  '♠': { name: 'スペ３',   color: '#8e44ad' },
+  '♥': { name: 'ギフト',   color: '#e91e63' },
+  '♣': { name: 'リセット',  color: '#795548' },
+  '♦': { name: '８切返し', color: '#ff5722' },
+};
+
 // ===================== ゲーム設定 =====================
 let gameConfig = {
   totalRounds: 1,
@@ -192,25 +200,34 @@ function updateLocks(prevField, newCards) {
     return;
   }
 
-  // ---- 数字縛り（連続ランク） ----
+  // ---- 数字縛り（連続ランク・革命/11バック対応） ----
+  // cardValue() で強さを比較することで、革命/11バック中は逆順で連続判定する
   const prevRank = getMainRank(prevField);
   const newRank  = getMainRank(newCards);
-  if (prevRank && newRank && RANK_ORDER[newRank] === RANK_ORDER[prevRank] + 1) {
-    const nextVal = RANK_ORDER[newRank] + 1;
-    state.numberLock = RANK_BY_VAL[nextVal] || null;
+  if (prevRank && newRank) {
+    const prevVal = cardValue({ rank: prevRank });
+    const newVal  = cardValue({ rank: newRank });
+    if (newVal === prevVal + 1) {
+      const nextStrength = newVal + 1;
+      const reversed = state.revolution !== state.elevenBack;
+      // 強さ→ランク変換: reversed時は base=17-strength, 通常は base=strength
+      const nextBase = reversed ? (17 - nextStrength) : nextStrength;
+      state.numberLock = RANK_BY_VAL[nextBase] || null;
+    } else {
+      state.numberLock = null;
+    }
   } else {
     state.numberLock = null;
   }
 
   // ---- スート縛り（両場に共通するスートをすべて縛る） ----
-  // 複数枚でも「前の場のスート集合 ∩ 今のスート集合」が1つ以上あれば全部縛る
-  if (state.suitLock.length === 0) {
-    const prevSuits = new Set(prevField.filter(c => c.rank !== 'JOKER').map(c => c.suit));
-    const newSuits  = new Set(newCards.filter(c => c.rank !== 'JOKER').map(c => c.suit));
-    const common = [...prevSuits].filter(s => newSuits.has(s));
-    if (common.length >= 1) {
-      state.suitLock = common;   // 配列で保持
-    }
+  // 縛りの有無にかかわらず、前の場と今の出し手の共通スートで毎回更新する
+  // → 片方縛り中に両方同スートで出したとき、両方縛りに拡張される
+  const prevSuits = new Set(prevField.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+  const newSuits  = new Set(newCards.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+  const common = [...prevSuits].filter(s => newSuits.has(s));
+  if (common.length >= 1) {
+    state.suitLock = common;   // 配列で保持（拡張・縮小ともに反映）
   }
 }
 
@@ -360,6 +377,9 @@ function isCardPotentiallyPlayable(card) {
   const hand = state.players[0].hand;
   const fieldLen = state.field.length;
 
+  // ♣3 (リセット) はあらゆる制限を無視して常に1枚で出せる
+  if (card.suit === '♣' && card.rank === '3') return true;
+
   // 数字縛りチェック（ジョーカーは免除）
   if (card.rank !== 'JOKER' && state.numberLock && card.rank !== state.numberLock) return false;
 
@@ -367,14 +387,22 @@ function isCardPotentiallyPlayable(card) {
 
   const fldStrength = getFieldStrength();
 
-  // 特例：場が単体ジョーカーのとき ♠3 だけ光らせる
+  // 特例：場が単体ジョーカーのとき ♠3 だけ光らせる（スート縛りがある場合は縛りも確認）
   if (fieldLen === 1 && state.field[0].rank === 'JOKER') {
-    return card.suit === '♠' && card.rank === '3';
+    if (!(card.suit === '♠' && card.rank === '3')) return false;
+    if (state.suitLock.length > 0 && !state.suitLock.includes('♠')) return false;
+    return true;
   }
 
-  // ジョーカー自身：強さが場を超えるか
+  // ジョーカー自身
   if (card.rank === 'JOKER') {
-    return cardValue(card) > fldStrength;
+    if (cardValue(card) <= fldStrength) return false;
+    if (fieldLen === 1) return true;
+    // 複数枚出し：同ランクのパートナーが (fieldLen-1) 枚以上あるか（スート縛りはジョーカー免除）
+    const strongPartners = hand.filter(c => c.rank !== 'JOKER' && cardValue(c) > fldStrength);
+    const grps = {};
+    strongPartners.forEach(c => { grps[c.rank] = (grps[c.rank] || 0) + 1; });
+    return Object.values(grps).some(cnt => cnt >= fieldLen - 1);
   }
 
   // ---- 場が階段の場合 ----
@@ -396,14 +424,18 @@ function isCardPotentiallyPlayable(card) {
   }
 
   // 複数枚出し：このカードを含む組が縛りスートをすべてカバーできるかチェック
-  // 新ルール：各縛りスートが組の中に少なくとも1枚含まれていれば出せる
+  // ジョーカーはオールマイティとして未カバーの縛りスートを1つ補填できる
   if (state.suitLock.length > 0) {
+    const jokerAvail = hand.some(c => c.rank === 'JOKER');
     const uncoveredLocks = state.suitLock.filter(s => s !== card.suit);
-    // パートナーのスロット数が足りないと縛りを満たせない
     if (uncoveredLocks.length > fieldLen - 1) return false;
-    // 未カバーの各縛りスートに対して、同ランクのパートナーが存在するか
+    let jokerUsed = false;
     for (const lockSuit of uncoveredLocks) {
-      if (!hand.some(c => c.id !== card.id && c.rank === card.rank && c.suit === lockSuit)) return false;
+      const covered = hand.some(c => c.id !== card.id && c.rank === card.rank && c.suit === lockSuit);
+      if (!covered) {
+        if (jokerAvail && !jokerUsed) jokerUsed = true;
+        else return false;
+      }
     }
   }
 
@@ -415,13 +447,17 @@ function isCardPotentiallyPlayable(card) {
 
 function canPlay(selected) {
   if (selected.length === 0) return false;
+  // ♣3 (リセット) はどんな場でも1枚で出せる（縛り・強さを無視）
+  if (selected.length === 1 && selected[0].suit === '♣' && selected[0].rank === '3') return true;
   if (state.numberLock) {
     if (selected.filter(c => c.rank !== 'JOKER').some(c => c.rank !== state.numberLock)) return false;
   }
   if (state.suitLock.length > 0) {
-    // 各縛りスートが選択カードに少なくとも1枚含まれているか（ジョーカーはスートなしで免除）
+    // ジョーカーはオールマイティ：未カバーの縛りスートを1つ補填できる
     const nonJokers = selected.filter(c => c.rank !== 'JOKER');
-    if (state.suitLock.some(s => !nonJokers.some(c => c.suit === s))) return false;
+    const hasJoker  = selected.some(c => c.rank === 'JOKER');
+    const uncovered = state.suitLock.filter(s => !nonJokers.some(c => c.suit === s));
+    if (uncovered.length > (hasJoker ? 1 : 0)) return false;
   }
   const fieldLen = state.field.length;
   if (fieldLen === 0) return isValidSet(selected);
@@ -658,6 +694,7 @@ function checkForbiddenStuck() {
 
 function nextTurn() {
   if (checkForbiddenStuck()) return;
+  const fivePlayer = state.currentPlayer; // 5を出したプレイヤー（全員スキップ時に戻る）
   let next = getNextActivePlayer(state.currentPlayer);
   while (state.skipNext > 0) {
     state.skipNext--;
@@ -670,6 +707,7 @@ function nextTurn() {
         state.skipNext = 0; // 残りスキップをキャンセルして場リセット
         resetField();
         setMessage(`${skipped.name}をスキップ！場をリセット！`);
+        next = fivePlayer; // 5を出したプレイヤーに手番を戻す
         break;
       } else {
         setMessage(`${skipped.name}をスキップ！`);
@@ -690,16 +728,38 @@ function nextTurn() {
 function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
   const player = state.players[playerIdx];
   const count = cards.length;
+
+  // ---- 3 スート別効果（rank==='3'は EFFECT_INFO に登録なし） ----
+  if (rank === '3') {
+    const suit3 = nonJokers[0]?.suit;
+    if (suit3 === '♣') {
+      // ♣3 リセット：場への配置は doPlay 済み。通知のみ
+      showEffectNotice('リセット！', '#795548');
+      done(false);
+      return;
+    }
+    if (suit3 === '♥' && count === 1) {
+      // ♥3 ギフト
+      handleHeart3Gift(playerIdx, done);
+      return;
+    }
+    // ♦3 通常ターン出し・♠3 は効果なし（それぞれ割り込み/doPlay で処理）
+    done(false);
+    return;
+  }
+
   const info = EFFECT_INFO[rank];
   if (!info) { done(false); return; }
   showEffectNotice(info.name, info.color);
 
   switch (rank) {
     case '4': {
-      if (state.discardPile.length === 0) { done(false); return; }
+      // 何枚出しても拾えるのは1枚、ジョーカーは拾えない
+      const pickable = state.discardPile.filter(c => c.rank !== 'JOKER');
+      if (pickable.length === 0) { done(false); return; }
       if (player.isHuman) {
-        showEffectModal(`💀 死者蘇生`, `捨て札から最大 ${count} 枚を手札に戻せます（0枚でもOK）`,
-          [...state.discardPile], count,
+        showEffectModal(`💀 死者蘇生`, `捨て札から1枚を手札に戻せます（0枚でもOK）`,
+          pickable, 1,
           (selected) => {
             selected.forEach(c => {
               state.discardPile.splice(state.discardPile.findIndex(x => x.id === c.id), 1);
@@ -712,7 +772,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
           }
         );
       } else {
-        const picks = [...state.discardPile].sort((a,b) => RANK_ORDER[b.rank]-RANK_ORDER[a.rank]).slice(0, count);
+        const picks = [...pickable].sort((a,b) => RANK_ORDER[b.rank]-RANK_ORDER[a.rank]).slice(0, 1);
         picks.forEach(c => { state.discardPile.splice(state.discardPile.findIndex(x=>x.id===c.id),1); player.hand.push(c); });
         sortHand(player.hand);
         setMessage(`${player.name}が捨て札から ${picks.length} 枚回収！`);
@@ -843,7 +903,10 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
     case '8': {
       resetField();
       setMessage(`${player.name}が８切り！場を流して続ける`);
-      render(); done(true); break;
+      render();
+      // ♦3「８切返し」割り込みチェック → 誰も割り込まなければ done(true)
+      checkDiamond3Interrupt(playerIdx, () => done(true));
+      break;
     }
     case '10': {
       if (player.hand.length === 0) { done(false); return; }
@@ -874,6 +937,194 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
   }
 }
 
+// ===================== ♥3 ギフト =====================
+function handleHeart3Gift(playerIdx, done) {
+  const player = state.players[playerIdx];
+  if (state.discardPile.length === 0) { done(false); return; }
+  showEffectNotice('ギフト！', '#e91e63');
+
+  if (player.isHuman) {
+    showEffectModal('💝 ギフト', '捨て札から1枚選んで、誰かに渡します（0枚でキャンセル）',
+      [...state.discardPile], 1,
+      (selected) => {
+        if (selected.length === 0) { render(); done(false); return; }
+        const card = selected[0];
+        state.discardPile.splice(state.discardPile.findIndex(x => x.id === card.id), 1);
+        // 渡す相手を選択
+        showPlayerSelectModal('💝 ギフト', `${card.suit}${card.rank} を誰に渡しますか？`,
+          state.players.filter(p => !p.finished),
+          (targetIdx) => {
+            state.players[targetIdx].hand.push(card);
+            sortHand(state.players[targetIdx].hand);
+            if (state.players[targetIdx].isHuman) highlightNewCards([card]);
+            setMessage(`${state.players[targetIdx].name} に ${card.suit}${card.rank} を渡した！`);
+            render(); done(false);
+          }
+        );
+      }
+    );
+  } else {
+    // CPU：最強カードを自分の手札に
+    const picked = [...state.discardPile].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])[0];
+    state.discardPile.splice(state.discardPile.findIndex(x => x.id === picked.id), 1);
+    player.hand.push(picked);
+    sortHand(player.hand);
+    setMessage(`${player.name} がギフト！捨て札から ${picked.suit}${picked.rank} を回収`);
+    render(); done(false);
+  }
+}
+
+// ===================== ♦3 ８切返し =====================
+function checkDiamond3Interrupt(eightCutterIdx, onNoInterrupt) {
+  // 8切りしたプレイヤー以外で♦3を持つ人を順番に収集
+  const candidates = [];
+  let cur = getNextActivePlayer(eightCutterIdx);
+  for (let i = 0; i < 3; i++) {
+    if (cur === eightCutterIdx) break;
+    const p = state.players[cur];
+    if (!p.finished && p.hand.some(c => c.suit === '♦' && c.rank === '3')) {
+      candidates.push(cur);
+    }
+    const nxt = getNextActivePlayer(cur);
+    if (nxt === cur) break;
+    cur = nxt;
+  }
+  if (candidates.length === 0) { onNoInterrupt(); return; }
+  processD3Chain(candidates, 0, onNoInterrupt);
+}
+
+function processD3Chain(candidates, idx, onNoInterrupt) {
+  if (idx >= candidates.length) { onNoInterrupt(); return; }
+  const playerIdx = candidates[idx];
+  const player = state.players[playerIdx];
+
+  if (player.isHuman) {
+    showConfirmModal('♦ ８切返し',
+      '♦3 で割り込みますか？（場はリセット済み、あなたが続けて出せます）',
+      () => playDiamond3Interrupt(playerIdx),
+      () => processD3Chain(candidates, idx + 1, onNoInterrupt)
+    );
+  } else {
+    // CPU は 50% で割り込む
+    if (Math.random() < 0.5) {
+      setTimeout(() => playDiamond3Interrupt(playerIdx), 700);
+    } else {
+      processD3Chain(candidates, idx + 1, onNoInterrupt);
+    }
+  }
+}
+
+function playDiamond3Interrupt(playerIdx) {
+  const player = state.players[playerIdx];
+  const d3 = player.hand.find(c => c.suit === '♦' && c.rank === '3');
+  if (!d3) return;
+
+  // ♦3 を手札から捨て札へ（場は 8-cut ですでに空）
+  player.hand.splice(player.hand.findIndex(c => c.id === d3.id), 1);
+  state.discardPile.push(d3);
+
+  showEffectNotice('♦3! ８切返し！', '#ff5722');
+  setMessage(`${player.name} が ♦3 で割り込み！`);
+  state.currentPlayer = playerIdx;
+  render();
+
+  if (checkFinish(playerIdx)) return;
+
+  // ♦3 プレイヤーが空場でもう1ターン（8切りと同じ扱い）
+  if (player.isHuman) {
+    enableActions(true);
+    setMessage('♦3 の効果！もう一度あなたのターン（８切返し）');
+  } else {
+    setTimeout(() => cpuTurn(), 900);
+  }
+}
+
+// ===================== 汎用確認モーダル =====================
+function showConfirmModal(title, desc, onYes, onNo) {
+  const modal = document.createElement('div');
+  modal.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;' +
+    'align-items:center;justify-content:center;z-index:95;';
+
+  const box = document.createElement('div');
+  box.style.cssText =
+    'background:#1a3a2a;border:2px solid #ffd700;border-radius:16px;' +
+    'padding:28px 32px;text-align:center;min-width:300px;';
+
+  const titleEl = document.createElement('h3');
+  titleEl.textContent = title;
+  titleEl.style.cssText = 'font-size:22px;color:#ffd700;margin-bottom:10px;';
+
+  const descEl = document.createElement('p');
+  descEl.textContent = desc;
+  descEl.style.cssText = 'font-size:14px;color:#ccc;margin-bottom:20px;line-height:1.5;';
+
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:14px;justify-content:center;';
+
+  const yesBtn = document.createElement('button');
+  yesBtn.textContent = '割り込む！';
+  yesBtn.style.cssText =
+    'padding:10px 22px;font-size:15px;font-weight:bold;background:#e74c3c;' +
+    'color:#fff;border:none;border-radius:10px;cursor:pointer;';
+  yesBtn.addEventListener('click', () => { modal.remove(); onYes(); });
+
+  const noBtn = document.createElement('button');
+  noBtn.textContent = 'パス';
+  noBtn.style.cssText =
+    'padding:10px 22px;font-size:15px;font-weight:bold;background:#7f8c8d;' +
+    'color:#fff;border:none;border-radius:10px;cursor:pointer;';
+  noBtn.addEventListener('click', () => { modal.remove(); onNo(); });
+
+  btns.appendChild(yesBtn);
+  btns.appendChild(noBtn);
+  box.appendChild(titleEl);
+  box.appendChild(descEl);
+  box.appendChild(btns);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+}
+
+// ===================== プレイヤー選択モーダル =====================
+function showPlayerSelectModal(title, desc, players, callback) {
+  const modal = document.createElement('div');
+  modal.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;' +
+    'align-items:center;justify-content:center;z-index:95;';
+
+  const box = document.createElement('div');
+  box.style.cssText =
+    'background:#1a3a2a;border:2px solid #ffd700;border-radius:16px;' +
+    'padding:28px 32px;text-align:center;';
+
+  const titleEl = document.createElement('h3');
+  titleEl.textContent = title;
+  titleEl.style.cssText = 'font-size:22px;color:#ffd700;margin-bottom:10px;';
+
+  const descEl = document.createElement('p');
+  descEl.textContent = desc;
+  descEl.style.cssText = 'font-size:14px;color:#ccc;margin-bottom:18px;';
+
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:10px;justify-content:center;flex-wrap:wrap;';
+
+  players.forEach(p => {
+    const btn = document.createElement('button');
+    btn.textContent = p.name + (p.isHuman ? '（自分）' : '');
+    btn.style.cssText =
+      'padding:12px 22px;font-size:15px;font-weight:bold;background:#2c5f4a;' +
+      'color:#fff;border:2px solid #aaa;border-radius:10px;cursor:pointer;';
+    btn.addEventListener('click', () => { modal.remove(); callback(p.id); });
+    btns.appendChild(btn);
+  });
+
+  box.appendChild(titleEl);
+  box.appendChild(descEl);
+  box.appendChild(btns);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+}
+
 // ===================== CPU AI =====================
 function cpuTurn() {
   if (state.gameOver) return;
@@ -882,6 +1133,12 @@ function cpuTurn() {
 
   const fieldLen = state.field.length;
   let played = fieldLen === 0 ? findPlayableFromEmpty(player.hand) : findPlayable(player.hand, fieldLen);
+
+  // ♣3 リセット：場があって出す手がない場合の最終手段
+  if (!played && fieldLen > 0) {
+    const c3 = player.hand.find(c => c.suit === '♣' && c.rank === '3');
+    if (c3) played = [c3];
+  }
 
   // 詰み回避：手札が [禁止, 通常] の2枚のとき、禁止カードを先に出せるなら優先する
   // （禁止カードを先に出せば、次のターンで通常カードで正常上がりできる）
@@ -981,12 +1238,14 @@ function findPlayable(hand, count) {
     if (Number(v) <= fldStrength) continue;
     const total = cards.length + jokers.length;
     if (total < count) continue;
-    // 縛りがある場合：縛りスートを優先して選択し、全縛りスートをカバーできるか確認
+    // 縛りがある場合：ジョーカーは未カバーの縛りスートを1つ補填できる
     if (state.suitLock.length > 0) {
+      const hasJ = jokers.length > 0;
       const inLock = cards.filter(c => state.suitLock.includes(c.suit));
       const coveredSuits = new Set(inLock.map(c => c.suit));
-      if (!state.suitLock.every(s => coveredSuits.has(s))) continue; // 縛りをカバーできない
-      // 縛りスートのカードを優先し、残りを任意のカードで埋める
+      const uncovered = state.suitLock.filter(s => !coveredSuits.has(s));
+      if (uncovered.length > (hasJ ? 1 : 0)) continue; // ジョーカー1枚で1スートまで補填
+      // 縛りスートのカードを優先し、残りを任意のカードで埋める（ジョーカーで補填）
       const notInLock = cards.filter(c => !state.suitLock.includes(c.suit));
       const selection = [...inLock, ...notInLock, ...jokers].slice(0, count);
       if (selection.length === count) return selection;
@@ -1231,9 +1490,7 @@ function renderPlayerHand() {
       }
     }
 
-    const effectInfo = card.suit === '♠' && card.rank === '3'
-      ? { name: 'スペ３', color: '#8e44ad' }
-      : EFFECT_INFO[card.rank];
+    const effectInfo = card.rank === '3' ? SUIT3_EFFECTS[card.suit] : EFFECT_INFO[card.rank];
     if (effectInfo) {
       const badge = document.createElement('div');
       badge.className = 'effect-badge';
