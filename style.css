@@ -11,6 +11,7 @@ body {
   font-family: 'Segoe UI', sans-serif;
   color: #fff;
   height: 100vh;
+  height: 100svh; /* モバイル：URLバー込みの最小ビューポート高さ */
   overflow: hidden;
 }
 
@@ -18,6 +19,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100svh;
   gap: 8px;
   padding: 8px;
 }
@@ -52,7 +54,8 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 130px;
+  min-height: 100px;
+  flex-shrink: 1;   /* 画面が小さいとき縮む */
   position: relative;
 }
 
@@ -92,6 +95,7 @@ body {
   display: flex;
   gap: 8px;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .cpu-player {
@@ -150,10 +154,13 @@ body {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-shrink: 0;
+  min-height: 0;
 }
 
 #player-hand-area {
   flex: 1;
+  min-width: 0; /* 横スクロール有効化に必要 */
 }
 
 #player-label {
@@ -166,7 +173,14 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  /* 枚数が多いとき横スクロール可能にする */
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 4px; /* スクロールバー/選択浮き上がり用 */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox */
 }
+#player-hand::-webkit-scrollbar { display: none; } /* Chrome/Safari */
 
 /* カード */
 .card {
@@ -498,3 +512,56 @@ button:disabled {
 }
 
 .hidden { display: none !important; }
+
+/* ===================== スマホ縦画面コンパクト ===================== */
+@media (max-height: 700px) {
+  #app { gap: 4px; padding: 4px; }
+
+  #status-bar { min-height: 32px; padding: 5px 10px; }
+  #game-message { font-size: 13px; }
+  #rank-display  { font-size: 11px; }
+
+  #field { min-height: 72px; padding: 6px; }
+  #field-info { font-size: 11px; }
+  #revolution-badge { font-size: 11px; padding: 2px 8px; }
+  #lock-display { font-size: 11px; }
+
+  #cpu-area { gap: 4px; }
+  .cpu-player { padding: 5px 8px; }
+  .cpu-label  { font-size: 11px; }
+  .cpu-count  { font-size: 10px; }
+  .cpu-card-back { width: 18px; height: 28px; }
+
+  /* プレイヤーエリア：手札上・ボタン下の縦並び */
+  #player-area {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px;
+  }
+  #player-hand {
+    flex-wrap: nowrap;    /* 1行横スクロールに切り替え */
+    padding-bottom: 2px;
+  }
+  #player-label { font-size: 11px; margin-bottom: 4px; }
+
+  #action-area {
+    flex-direction: row;
+    justify-content: center;
+  }
+  #action-area button {
+    padding: 8px 20px;
+    font-size: 13px;
+    flex: 1;
+    max-width: 140px;
+  }
+
+  /* カード：一回り小さく */
+  .card { width: 42px; height: 62px; font-size: 12px; }
+  .card-suit { font-size: 15px; }
+  .card-rank { font-size: 11px; }
+  .card:hover  { transform: translateY(-4px); }
+  .card.selected { transform: translateY(-10px); }
+  .field-card { width: 36px; height: 52px; }
+  .effect-badge { font-size: 6px; }
+}

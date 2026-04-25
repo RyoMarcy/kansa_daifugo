@@ -3,7 +3,7 @@ const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['3','4','5','6','7','8','9','10','J','Q','K','A','2'];
 const RANK_ORDER = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':15,'JOKER':16 };
 const RANK_BY_VAL = Object.fromEntries(Object.entries(RANK_ORDER).map(([k,v]) => [v,k]));
-const RANK_NAMES = ['大富豪', '富豪', '平民', '大貧民'];
+const RANK_NAMES = ['大富豪', '富豪', '貧民', '大貧民'];
 
 const EFFECT_INFO = {
   '4':  { name: '死者蘇生', color: '#8e44ad' },
@@ -121,18 +121,38 @@ function getMainSuit(cards) {
   return nj.every(c => c.suit === s) ? s : null;
 }
 
+// 階段内のジョーカーが代替するランクを返す（内部ギャップ → そのランク、端 → 小さい側）
+function getJokerSubstRank(cards) {
+  const nonJokers = cards.filter(c => c.rank !== 'JOKER');
+  if (nonJokers.length === cards.length) return null;
+  const vals = nonJokers.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] - vals[i - 1] > 1) return RANK_BY_VAL[vals[i - 1] + 1] || null; // 内部ギャップ
+  }
+  // ギャップなし → 端に配置（小さい側を優先。範囲外なら大きい側）
+  const lower = vals[0] - 1;
+  const upper = vals[vals.length - 1] + 1;
+  return RANK_BY_VAL[lower] || RANK_BY_VAL[upper] || null;
+}
+
 // ===================== 階段ヘルパー =====================
-// 階段判定（3枚以上、同スート、連続ランク、ジョーカー不可）
+// 階段判定（3枚以上、同スート、連続ランク）
+// ジョーカーは最大1枚まで「穴埋め」として使用可
 function isSequence(cards) {
   if (cards.length < 3) return false;
-  if (cards.some(c => c.rank === 'JOKER')) return false;
-  const suit = cards[0].suit;
-  if (!cards.every(c => c.suit === suit)) return false;
-  const vals = cards.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
-  for (let i = 1; i < vals.length; i++) {
-    if (vals[i] !== vals[i - 1] + 1) return false;
-  }
-  return true;
+  const jokers = cards.filter(c => c.rank === 'JOKER');
+  if (jokers.length > 1) return false;
+  const nonJokers = cards.filter(c => c.rank !== 'JOKER');
+  if (nonJokers.length === 0) return false;
+  const suit = nonJokers[0].suit;
+  if (!nonJokers.every(c => c.suit === suit)) return false;
+  const vals = nonJokers.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
+  // 重複チェック
+  for (let i = 1; i < vals.length; i++) if (vals[i] === vals[i - 1]) return false;
+  const span = vals[vals.length - 1] - vals[0];
+  if (jokers.length === 0) return span === cards.length - 1; // ジョーカーなし：完全連続
+  // ジョーカーあり：穴1つ分以内のスパンであればOK
+  return span <= cards.length - 1;
 }
 
 // このカードを含む、seqLen枚の同スート連続セットが手札にあり、かつ強さがminStrengthを超えるか
@@ -313,7 +333,7 @@ function doCardExchange(callback) {
 
   // 大貧民の強い2枚 → 大富豪
   takeTopCards(daihinmin, daihugo, 2);
-  // 平民の強い1枚 → 富豪
+  // 貧民の強い1枚 → 富豪
   takeTopCards(heimin, fugo, 1);
 
   render();
@@ -398,8 +418,12 @@ function isCardPotentiallyPlayable(card) {
   if (card.rank === 'JOKER') {
     if (cardValue(card) <= fldStrength) return false;
     if (fieldLen === 1) return true;
-    // 複数枚出し：同ランクのパートナーが (fieldLen-1) 枚以上あるか（スート縛りはジョーカー免除）
     const strongPartners = hand.filter(c => c.rank !== 'JOKER' && cardValue(c) > fldStrength);
+    // 場が階段：同スートが (fieldLen-1) 枚以上あればジョーカーを組み込める可能性あり
+    if (isSequence(state.field)) {
+      return SUITS.some(s => strongPartners.filter(c => c.suit === s).length >= fieldLen - 1);
+    }
+    // 場がグループ：同ランクが (fieldLen-1) 枚以上あるか
     const grps = {};
     strongPartners.forEach(c => { grps[c.rank] = (grps[c.rank] || 0) + 1; });
     return Object.values(grps).some(cnt => cnt >= fieldLen - 1);
@@ -562,9 +586,11 @@ function doPlay(playerIdx, cards) {
   state.field = cards;
   state.passCount = 0;
 
-  // 革命チェック
+  // 革命チェック（4枚同ランク or 4枚以上の階段）
   const nonJokers = cards.filter(c => c.rank !== 'JOKER');
-  if (cards.length === 4 && nonJokers.length >= 1 && nonJokers.every(c => c.rank === nonJokers[0].rank)) {
+  const isGroupRev = cards.length === 4 && nonJokers.length >= 1 && nonJokers.every(c => c.rank === nonJokers[0].rank);
+  const isSeqRev   = isSequence(cards) && cards.length >= 4;
+  if (isGroupRev || isSeqRev) {
     state.revolution = !state.revolution;
     showBadgeFlash('革命' + (state.revolution ? '発動！' : '解除！'));
   }
@@ -591,10 +617,18 @@ function doPlay(playerIdx, cards) {
   selectedCards = [];
   render();
 
-  const effectRank = nonJokers.length > 0 ? nonJokers[0].rank : null;
-  handleSpecialEffect(playerIdx, cards, effectRank, nonJokers, (samePlayer) => {
-    afterEffect(playerIdx, samePlayer);
-  });
+  if (isSequence(cards)) {
+    // 階段：ジョーカー代替ランクを含む効果ランクを昇順で順番に処理
+    const seqEffectRanks = getSeqEffectRanks(cards);
+    processSequenceEffects(playerIdx, cards, seqEffectRanks, 0, false, (samePlayer) => {
+      afterEffect(playerIdx, samePlayer);
+    });
+  } else {
+    const effectRank = nonJokers.length > 0 ? nonJokers[0].rank : null;
+    handleSpecialEffect(playerIdx, cards, effectRank, nonJokers, (samePlayer) => {
+      afterEffect(playerIdx, samePlayer);
+    });
+  }
 }
 
 function doPass(playerIdx) {
@@ -722,6 +756,31 @@ function nextTurn() {
     if (player.isHuman) { enableActions(true); if (!state.gameOver) setMessage('あなたのターンです'); }
     else { enableActions(false); setTimeout(() => cpuTurn(), 900); }
   }
+}
+
+// ===================== 階段エフェクトチェーン =====================
+// 階段内のジョーカーを代替ランクに変換した上で、効果ランク一覧を返す
+function getSeqEffectRanks(cards) {
+  const jokerRank = getJokerSubstRank(cards); // ジョーカーが代替するランク（なければ null）
+  const ranks = cards.map(c => c.rank === 'JOKER' ? jokerRank : c.rank)
+    .filter(r => r && EFFECT_INFO[r]);
+  return [...new Set(ranks)].sort((a, b) => RANK_ORDER[a] - RANK_ORDER[b]);
+}
+
+// 階段に含まれる各ランクの効果を順番に処理する
+function processSequenceEffects(playerIdx, seqCards, effectRanks, idx, accSamePlayer, done) {
+  if (idx >= effectRanks.length) { done(accSamePlayer); return; }
+  const rank = effectRanks[idx];
+  let rankCards = seqCards.filter(c => c.rank === rank);
+  if (rankCards.length === 0) {
+    // ジョーカーが代替しているランク → ジョーカーを代理カードとして使用（スートは階段スートに統一）
+    const joker = seqCards.find(c => c.rank === 'JOKER');
+    const seqSuit = seqCards.find(c => c.rank !== 'JOKER')?.suit || '♠';
+    if (joker) rankCards = [{ rank, suit: seqSuit, id: joker.id }];
+  }
+  handleSpecialEffect(playerIdx, rankCards, rank, rankCards, (samePlayer) => {
+    processSequenceEffects(playerIdx, seqCards, effectRanks, idx + 1, accSamePlayer || samePlayer, done);
+  });
 }
 
 // ===================== 特殊効果 =====================
