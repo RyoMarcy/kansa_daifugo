@@ -1600,5 +1600,15 @@ function makeCardEl(card, small) {
 
 // ===================== 初期表示 =====================
 window.onload = () => {
+  // iOS Safari: visualViewport で実際の可視高さを CSS 変数にセット
+  // （ツールバーの表示/非表示に追従して再計算）
+  function updateVh() {
+    const h = (window.visualViewport?.height ?? window.innerHeight) + 'px';
+    document.documentElement.style.setProperty('--actual-vh', h);
+  }
+  updateVh();
+  window.visualViewport?.addEventListener('resize', updateVh);
+  window.addEventListener('resize', updateVh);
+
   document.getElementById('overlay').classList.remove('hidden');
 };

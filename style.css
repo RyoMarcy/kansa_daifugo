@@ -10,8 +10,10 @@ body {
   background: #1a6b3c;
   font-family: 'Segoe UI', sans-serif;
   color: #fff;
-  height: 100vh;
-  height: 100svh; /* モバイル：URLバー込みの最小ビューポート高さ */
+  height: 100vh;                    /* 最終フォールバック */
+  height: -webkit-fill-available;   /* 旧 iOS Safari：実際の可視領域に合わせる */
+  height: 100svh;                   /* モダン：URLバーを含む最小ビューポート */
+  height: var(--actual-vh, 100svh); /* JS 計測値（最優先） */
   overflow: hidden;
 }
 
@@ -19,9 +21,14 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: -webkit-fill-available;
   height: 100svh;
+  height: var(--actual-vh, 100svh);
   gap: 8px;
   padding: 8px;
+  /* iOS Safari ボトムバー分の安全領域を確保 */
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 /* ステータスバー */
@@ -607,7 +614,7 @@ button:disabled {
 }
 
 /* ===================== スマホ縦画面コンパクト ===================== */
-@media (max-height: 700px) {
+@media (max-height: 750px) {
   #app { gap: 4px; padding: 4px; }
 
   #status-bar { min-height: 32px; padding: 5px 10px; }
