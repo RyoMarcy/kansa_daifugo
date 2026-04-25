@@ -251,6 +251,11 @@ function updateLocks(prevField, newCards) {
   }
 }
 
+// ===================== ヘルプモーダル =====================
+function toggleHelp() {
+  document.getElementById('help-modal').classList.toggle('hidden');
+}
+
 // ===================== オーバーレイ制御 =====================
 function selectRounds(n) {
   gameConfig.totalRounds = n;

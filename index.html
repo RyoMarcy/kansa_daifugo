@@ -18,7 +18,46 @@
     <!-- ステータスバー -->
     <div id="status-bar">
       <div id="game-message">大富豪へようこそ！</div>
-      <div id="round-indicator"></div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div id="round-indicator"></div>
+        <button id="help-btn" onclick="toggleHelp()" title="カード効果一覧">ℹ</button>
+      </div>
+    </div>
+
+    <!-- カード効果一覧モーダル -->
+    <div id="help-modal" class="hidden">
+      <div id="help-modal-box">
+        <div id="help-modal-header">
+          <span>カード効果一覧</span>
+          <button onclick="toggleHelp()">✕</button>
+        </div>
+        <div id="help-modal-body">
+          <div class="help-section-title">── 3のスート効果 ──</div>
+          <div class="help-row"><span class="help-badge" style="background:#8e44ad">♠3 スペ３</span><span>単体ジョーカーに勝てる</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#e91e63">♥3 ギフト</span><span>1枚出し時：捨て札から1枚選んで誰かに渡す</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#795548">♣3 リセット</span><span>どんな場でも1枚で出せる。場をリセットして♣3を置く</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#ff5722">♦3 ８切返し</span><span>誰かが８切りしたとき割り込める。割り込むと自分が続けて出せる</span></div>
+          <div class="help-section-title">── 数字・絵札の効果 ──</div>
+          <div class="help-row"><span class="help-badge" style="background:#8e44ad">4 死者蘇生</span><span>枚数に関わらず捨て札から1枚回収できる（ジョーカー不可）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#2980b9">5 スキップ</span><span>出した枚数分の次のプレイヤーを飛ばす</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#16a085">6 強制縛り</span><span>出したカードのスートを縛る（その後は同スートのみ出せる）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#27ae60">7 ７渡し</span><span>次のプレイヤーに最大N枚渡せる（Nは出した枚数）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#e74c3c">8 ８切り</span><span>場をリセットして続けて出せる</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#d35400">9 ９回し</span><span>全員が宣言した枚数を時計回りに渡す</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#e67e22">10 10捨て</span><span>手札から最大N枚を捨てられる（Nは出した枚数）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#c0392b">J 11バック</span><span>この場の強弱が逆転する（次のリセットまで）</span></div>
+          <div class="help-section-title">── 特殊ルール ──</div>
+          <div class="help-row"><span class="help-badge" style="background:#e74c3c">革命</span><span>4枚同ランク or 4枚以上の階段で全体の強弱が永久逆転</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#555">縛り</span><span>同じスートで2連続出しするとスート縛り発動（以降同スートのみ）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#555">数字縛り</span><span>連続ランクで2連続出しすると次のランクに縛られる</span></div>
+          <div class="help-section-title">── ジョーカー ──</div>
+          <div class="help-row"><span class="help-badge" style="background:#555">🃏 単体</span><span>場が空か1枚のとき最強カードとして出せる。スート縛り免除</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#555">🃏 グループ</span><span>同ランクカードの代わりとして枚数合わせに使える。スート縛り1つ補填</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#555">🃏 階段</span><span>階段の穴埋めに使える（1枚のみ）。そのランクの効果も発揮する</span></div>
+          <div class="help-section-title">── 禁止上がり ──</div>
+          <div class="help-row"><span class="help-badge" style="background:#c0392b">禁止</span><span>通常時は2・ジョーカー、革命時は3・ジョーカーで上がれない（[詰]扱い）</span></div>
+        </div>
+      </div>
     </div>
 
     <!-- 場 -->
