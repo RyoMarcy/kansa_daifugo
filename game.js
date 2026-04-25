@@ -370,7 +370,15 @@ function giveBack(giver, receiver, count, callback) {
     showEffectModal(
       `🔄 カード交換`,
       `${RANK_NAMES[gameConfig.prevRanks[receiver.id]]}（${receiver.name}）に渡す ${count} 枚を選んでください`,
-      [...giver.hand], count, callback, true
+      [...giver.hand], count, (selected) => {
+        selected.forEach(c => {
+          giver.hand.splice(giver.hand.findIndex(x => x.id === c.id), 1);
+          receiver.hand.push(c);
+        });
+        sortHand(receiver.hand);
+        if (receiver.isHuman) highlightNewCards(selected);
+        callback(selected);
+      }, true
     );
   } else {
     // CPU: 最弱を渡す
