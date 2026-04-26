@@ -155,6 +155,78 @@ function isSequence(cards) {
   return span <= cards.length - 1;
 }
 
+// ===================== 電撃ヘルパー =====================
+// 電撃判定（3枚以上、同スート、等差数列、公差≥2）
+function isElectric(cards) {
+  if (cards.length < 3) return false;
+  if (cards.some(c => c.rank === 'JOKER')) return false;
+  const suit = cards[0].suit;
+  if (!cards.every(c => c.suit === suit)) return false;
+  const vals = cards.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
+  for (let i = 1; i < vals.length; i++) if (vals[i] === vals[i - 1]) return false;
+  const diff = vals[1] - vals[0];
+  if (diff < 2) return false; // 公差1は階段
+  for (let i = 2; i < vals.length; i++) {
+    if (vals[i] - vals[i - 1] !== diff) return false;
+  }
+  return true;
+}
+
+function getElectricDiff(cards) {
+  const vals = cards.map(c => RANK_ORDER[c.rank]).sort((a, b) => a - b);
+  return vals.length >= 2 ? vals[1] - vals[0] : 0;
+}
+
+// このカードを含む、count枚・公差fldDiffの電撃セットが手札にあり、強さがfldStrengthを超えるか
+function canBeInElectric(card, hand, count, fldStrength, fldDiff) {
+  if (card.rank === 'JOKER') return false;
+  const suit = card.suit;
+  const cardVal = RANK_ORDER[card.rank];
+  const suitCards = hand.filter(c => c.suit === suit && c.rank !== 'JOKER');
+  const hasVal = new Set(suitCards.map(c => RANK_ORDER[c.rank]));
+  const valToCard = Object.fromEntries(suitCards.map(c => [RANK_ORDER[c.rank], c]));
+  for (let p = 0; p < count; p++) {
+    const startVal = cardVal - p * fldDiff;
+    const endVal = startVal + (count - 1) * fldDiff;
+    if (startVal < 3 || endVal > 16) continue;
+    let ok = true;
+    const apCards = [];
+    for (let k = 0; k < count; k++) {
+      const v = startVal + k * fldDiff;
+      if (!hasVal.has(v)) { ok = false; break; }
+      apCards.push(valToCard[v]);
+    }
+    if (ok && Math.max(...apCards.map(c => cardValue(c))) > fldStrength) return true;
+  }
+  return false;
+}
+
+// 手札から全ての電撃候補（minLen枚以上）を列挙
+function findAllElectrics(hand, minLen = 3) {
+  const result = [];
+  for (const suit of SUITS) {
+    const sc = hand.filter(c => c.suit === suit && c.rank !== 'JOKER')
+      .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank]);
+    if (sc.length < minLen) continue;
+    const hasVal = new Set(sc.map(c => RANK_ORDER[c.rank]));
+    const valToCard = Object.fromEntries(sc.map(c => [RANK_ORDER[c.rank], c]));
+    for (let i = 0; i < sc.length; i++) {
+      const startVal = RANK_ORDER[sc[i].rank];
+      for (let diff = 2; diff <= 12; diff++) {
+        if (hasVal.has(startVal - diff)) continue; // この公差でのAP開始点ではない
+        const apCards = [];
+        let v = startVal;
+        while (hasVal.has(v)) { apCards.push(valToCard[v]); v += diff; }
+        if (apCards.length < minLen) continue;
+        for (let s = 0; s + minLen <= apCards.length; s++)
+          for (let e = s + minLen; e <= apCards.length; e++)
+            result.push(apCards.slice(s, e));
+      }
+    }
+  }
+  return result;
+}
+
 // このカードを含む、seqLen枚の同スート連続セットが手札にあり、かつ強さがminStrengthを超えるか
 function canBeInSequence(card, hand, seqLen, minStrength) {
   if (card.rank === 'JOKER') return false;
@@ -214,8 +286,8 @@ function resetField() {
 }
 
 function updateLocks(prevField, newCards) {
-  // 階段が絡む場合は縛りを適用しない
-  if (isSequence(prevField) || isSequence(newCards)) {
+  // 階段・電撃が絡む場合は縛りを適用しない
+  if (isSequence(prevField) || isSequence(newCards) || isElectric(prevField) || isElectric(newCards)) {
     state.numberLock = null;
     return;
   }
@@ -244,7 +316,14 @@ function updateLocks(prevField, newCards) {
   // 縛りの有無にかかわらず、前の場と今の出し手の共通スートで毎回更新する
   // → 片方縛り中に両方同スートで出したとき、両方縛りに拡張される
   const prevSuits = new Set(prevField.filter(c => c.rank !== 'JOKER').map(c => c.suit));
-  const newSuits  = new Set(newCards.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+  const newSuitsRaw = new Set(newCards.filter(c => c.rank !== 'JOKER').map(c => c.suit));
+  // ジョーカーがある場合、縛りスートのうち未カバーの1スートを補填する
+  // （ジョーカーはオールマイティなので、そのスートを「出した」とみなす）
+  const newSuits = new Set(newSuitsRaw);
+  if (newCards.some(c => c.rank === 'JOKER')) {
+    const uncovered = state.suitLock.filter(s => !newSuitsRaw.has(s));
+    if (uncovered.length > 0) newSuits.add(uncovered[0]);
+  }
   const common = [...prevSuits].filter(s => newSuits.has(s));
   if (common.length >= 1) {
     state.suitLock = common;   // 配列で保持（拡張・縮小ともに反映）
@@ -431,7 +510,11 @@ function isCardPotentiallyPlayable(card) {
   if (card.rank === 'JOKER') {
     if (cardValue(card) <= fldStrength) return false;
     if (fieldLen === 1) return true;
-    const strongPartners = hand.filter(c => c.rank !== 'JOKER' && cardValue(c) > fldStrength);
+    // 電撃にはジョーカーを使えない
+    if (isElectric(state.field)) return false;
+    let strongPartners = hand.filter(c => c.rank !== 'JOKER' && cardValue(c) > fldStrength);
+    // 数字縛り中はロックランクのカードのみをパートナー候補にする
+    if (state.numberLock) strongPartners = strongPartners.filter(c => c.rank === state.numberLock);
     // 場が階段：同スートが (fieldLen-1) 枚以上あればジョーカーを組み込める可能性あり
     if (isSequence(state.field)) {
       return SUITS.some(s => strongPartners.filter(c => c.suit === s).length >= fieldLen - 1);
@@ -440,6 +523,11 @@ function isCardPotentiallyPlayable(card) {
     const grps = {};
     strongPartners.forEach(c => { grps[c.rank] = (grps[c.rank] || 0) + 1; });
     return Object.values(grps).some(cnt => cnt >= fieldLen - 1);
+  }
+
+  // ---- 場が電撃の場合 ----
+  if (isElectric(state.field)) {
+    return canBeInElectric(card, hand, fieldLen, fldStrength, getElectricDiff(state.field));
   }
 
   // ---- 場が階段の場合 ----
@@ -507,10 +595,15 @@ function canPlay(selected) {
   if (selected.length !== fieldLen) return false;
   if (!isValidSet(selected)) return false;
 
-  // 階段 vs 階段、グループ vs グループ の一致チェック
-  const fieldIsSeq = isSequence(state.field);
-  const selIsSeq   = isSequence(selected);
-  if (fieldIsSeq !== selIsSeq) return false;
+  // 場のタイプ（階段・電撃・グループ）と一致チェック
+  const fieldIsSeq  = isSequence(state.field);
+  const selIsSeq    = isSequence(selected);
+  const fieldIsElec = isElectric(state.field);
+  const selIsElec   = isElectric(selected);
+  if (fieldIsSeq  !== selIsSeq)  return false;
+  if (fieldIsElec !== selIsElec) return false;
+  // 電撃は公差も一致が必要
+  if (fieldIsElec && getElectricDiff(state.field) !== getElectricDiff(selected)) return false;
 
   return maxStrength(selected) > getFieldStrength();
 }
@@ -520,6 +613,8 @@ function isValidSet(cards) {
   if (cards.length === 1) return true;
   // 階段判定（3枚以上の同スート連続）
   if (isSequence(cards)) return true;
+  // 電撃判定（3枚以上の同スート等差数列、公差≥2）
+  if (isElectric(cards)) return true;
   // グループ判定（同ランク）
   const nj = cards.filter(c => c.rank !== 'JOKER');
   if (nj.length === 0) return true;
@@ -599,11 +694,12 @@ function doPlay(playerIdx, cards) {
   state.field = cards;
   state.passCount = 0;
 
-  // 革命チェック（4枚同ランク or 4枚以上の階段）
+  // 革命チェック（4枚同ランク or 4枚以上の階段 or 4枚以上の電撃）
   const nonJokers = cards.filter(c => c.rank !== 'JOKER');
   const isGroupRev = cards.length === 4 && nonJokers.length >= 1 && nonJokers.every(c => c.rank === nonJokers[0].rank);
   const isSeqRev   = isSequence(cards) && cards.length >= 4;
-  if (isGroupRev || isSeqRev) {
+  const isElecRev  = isElectric(cards) && cards.length >= 4;
+  if (isGroupRev || isSeqRev || isElecRev) {
     state.revolution = !state.revolution;
     showBadgeFlash('革命' + (state.revolution ? '発動！' : '解除！'));
   }
@@ -630,8 +726,8 @@ function doPlay(playerIdx, cards) {
   selectedCards = [];
   render();
 
-  if (isSequence(cards)) {
-    // 階段：ジョーカー代替ランクを含む効果ランクを昇順で順番に処理
+  if (isSequence(cards) || isElectric(cards)) {
+    // 階段・電撃：各ランクの効果を昇順で順番に処理
     const seqEffectRanks = getSeqEffectRanks(cards);
     processSequenceEffects(playerIdx, cards, seqEffectRanks, 0, false, (samePlayer) => {
       afterEffect(playerIdx, samePlayer);
@@ -754,7 +850,10 @@ function nextTurn() {
         state.skipNext = 0; // 残りスキップをキャンセルして場リセット
         resetField();
         setMessage(`${skipped.name}をスキップ！場をリセット！`);
-        next = fivePlayer; // 5を出したプレイヤーに手番を戻す
+        // 5を出したプレイヤーがすでに上がっていたら次のアクティブプレイヤーへ
+        next = state.players[fivePlayer].finished
+          ? getNextActivePlayer(fivePlayer)
+          : fivePlayer;
         break;
       } else {
         setMessage(`${skipped.name}をスキップ！`);
@@ -844,6 +943,8 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
           }
         );
       } else {
+        // 手札が空になった（上がり）場合は効果を発動しない
+        if (player.hand.length === 0) { done(false); return; }
         const picks = [...pickable].sort((a,b) => RANK_ORDER[b.rank]-RANK_ORDER[a.rank]).slice(0, 1);
         picks.forEach(c => { state.discardPile.splice(state.discardPile.findIndex(x=>x.id===c.id),1); player.hand.push(c); });
         sortHand(player.hand);
@@ -1036,6 +1137,8 @@ function handleHeart3Gift(playerIdx, done) {
       }
     );
   } else {
+    // 手札が空になった（上がり）場合は効果を発動しない
+    if (player.hand.length === 0) { done(false); return; }
     // CPU：最強カードを自分の手札に
     const picked = [...state.discardPile].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])[0];
     state.discardPile.splice(state.discardPile.findIndex(x => x.id === picked.id), 1);
@@ -1259,12 +1362,14 @@ function findPlayableFromEmpty(hand) {
     if (group.length >= 2) return group;
   }
 
-  // 縛りがない場合、弱い階段があれば出す
+  // 縛りがない場合、弱い階段 or 電撃があれば出す
   if (!state.numberLock && state.suitLock.length === 0) {
     const seqs = findAllSequences(nonJokers);
-    if (seqs.length > 0) {
-      seqs.sort((a, b) => a.length - b.length || maxStrength(a) - maxStrength(b));
-      return seqs[0];
+    const elecs = findAllElectrics(nonJokers);
+    const combos = [...seqs, ...elecs];
+    if (combos.length > 0) {
+      combos.sort((a, b) => a.length - b.length || maxStrength(a) - maxStrength(b));
+      return combos[0];
     }
   }
 
@@ -1280,6 +1385,15 @@ function findPlayable(hand, count) {
       .filter(s => s.length === count && maxStrength(s) > fldStrength);
     if (seqs.length === 0) return null;
     return seqs.sort((a, b) => maxStrength(a) - maxStrength(b))[0];
+  }
+
+  // 場が電撃 → 同枚数・同公差の電撃で上回るものを探す
+  if (isElectric(state.field)) {
+    const fldDiff = getElectricDiff(state.field);
+    const elecs = findAllElectrics(hand, count)
+      .filter(e => e.length === count && getElectricDiff(e) === fldDiff && maxStrength(e) > fldStrength);
+    if (elecs.length === 0) return null;
+    return elecs.sort((a, b) => maxStrength(a) - maxStrength(b))[0];
   }
 
   let available = hand;
