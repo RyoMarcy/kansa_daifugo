@@ -3,7 +3,15 @@ const SUITS = ['♠', '♥', '♦', '♣'];
 const RANKS = ['3','4','5','6','7','8','9','10','J','Q','K','A','2'];
 const RANK_ORDER = { '3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14,'2':15,'JOKER':16 };
 const RANK_BY_VAL = Object.fromEntries(Object.entries(RANK_ORDER).map(([k,v]) => [v,k]));
-const RANK_NAMES = ['大富豪', '富豪', '貧民', '大貧民'];
+const RANK_NAMES   = ['大富豪', '富豪', '貧民', '大貧民'];          // 4人用（後方互換）
+const RANK_NAMES_3 = ['大富豪', '平民', '大貧民'];                   // 3人用
+const RANK_NAMES_5 = ['大富豪', '富豪', '平民', '貧民', '大貧民'];   // 5人用
+
+function getRankName(rank) {
+  const n = gameConfig?.numPlayers;
+  const names = n === 3 ? RANK_NAMES_3 : n === 5 ? RANK_NAMES_5 : RANK_NAMES;
+  return names[rank] ?? '不明';
+}
 
 const EFFECT_INFO = {
   '4':  { name: '死者蘇生', color: '#8e44ad' },
@@ -26,9 +34,10 @@ const SUIT3_EFFECTS = {
 
 // ===================== ゲーム設定 =====================
 let gameConfig = {
+  numPlayers: 4,            // 3 or 4
   totalRounds: 1,
   currentRound: 0,
-  points: [0, 0, 0, 0],   // 累計点数（低いほど良い）
+  points: [0, 0, 0, 0, 0], // 累計点数（低いほど良い）
   prevRanks: null,          // playerIdx → rank(0-3)
 };
 
@@ -140,10 +149,11 @@ function sortHand(hand) {
 }
 
 function getNextActivePlayer(fromIdx) {
-  let next = (fromIdx + 1) % 4;
-  for (let i = 0; i < 4; i++) {
+  const n = state.players.length;
+  let next = (fromIdx + 1) % n;
+  for (let i = 0; i < n; i++) {
     if (!state.players[next].finished) return next;
-    next = (next + 1) % 4;
+    next = (next + 1) % n;
   }
   return next;
 }
@@ -376,6 +386,14 @@ function toggleHelp() {
 }
 
 // ===================== オーバーレイ制御 =====================
+function selectPlayers(n) {
+  gameConfig.numPlayers = n;
+  document.querySelectorAll('.player-btn').forEach(b => b.classList.remove('selected'));
+  event.target.classList.add('selected');
+  document.getElementById('player-selector').classList.add('hidden');
+  document.getElementById('round-selector').classList.remove('hidden');
+}
+
 function selectRounds(n) {
   gameConfig.totalRounds = n;
   document.querySelectorAll('.round-btn').forEach(b => b.classList.remove('selected'));
@@ -398,8 +416,12 @@ function startRound() {
   addLog(`=== ラウンド ${gameConfig.currentRound} / ${gameConfig.totalRounds} ===`);
   const deck = shuffle(createDeck());
 
+  const playerNames = gameConfig.numPlayers === 3 ? ['あなた', 'CPU1', 'CPU2']
+                    : gameConfig.numPlayers === 5 ? ['あなた', 'CPU1', 'CPU2', 'CPU3', 'CPU4']
+                    : ['あなた', 'CPU1', 'CPU2', 'CPU3'];
+
   state = {
-    players: ['あなた','CPU1','CPU2','CPU3'].map((name, i) => ({
+    players: playerNames.map((name, i) => ({
       id: i, name, hand: [], isHuman: i === 0, finished: false, stuck: false, rank: null,
     })),
     field: [],
@@ -417,7 +439,7 @@ function startRound() {
     gameOver: false,
   };
 
-  deck.forEach((card, i) => state.players[i % 4].hand.push(card));
+  deck.forEach((card, i) => state.players[i % state.players.length].hand.push(card));
   state.players.forEach(p => sortHand(p.hand));
 
   updateRoundIndicator();
@@ -433,7 +455,7 @@ function startRound() {
 
 function beginPlay() {
   // ♠3 持ちから開始
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < state.players.length; i++) {
     if (state.players[i].hand.some(c => c.suit === '♠' && c.rank === '3')) {
       state.currentPlayer = i;
       break;
@@ -452,26 +474,25 @@ function beginPlay() {
 // ===================== カード交換 =====================
 function doCardExchange(callback) {
   const pr = gameConfig.prevRanks;
-  const daihugo  = state.players.find(p => pr[p.id] === 0);
-  const fugo     = state.players.find(p => pr[p.id] === 1);
-  const heimin   = state.players.find(p => pr[p.id] === 2);
-  const daihinmin= state.players.find(p => pr[p.id] === 3);
+  const daihugo   = state.players.find(p => pr[p.id] === 0);
+  const daihinmin = state.players.find(p => pr[p.id] === (gameConfig.numPlayers - 1));
 
-  // 大貧民の強い2枚 → 大富豪
-  takeTopCards(daihinmin, daihugo, 2);
-  // 貧民の強い1枚 → 富豪
-  takeTopCards(heimin, fugo, 1);
-
-  render();
-
-  // 大富豪が2枚を大貧民に渡す
-  giveBack(daihugo, daihinmin, 2, () => {
-    // 富豪が1枚を平民に渡す
-    giveBack(fugo, heimin, 1, () => {
-      render();
-      callback();
+  if (gameConfig.numPlayers === 3) {
+    // 3人：大貧民の強い2枚 → 大富豪、大富豪が2枚返す
+    takeTopCards(daihinmin, daihugo, 2);
+    render();
+    giveBack(daihugo, daihinmin, 2, () => { render(); callback(); });
+  } else {
+    // 4人/5人：大貧民2枚↔大富豪、貧民1枚↔富豪（貧民ランク = numPlayers-2）
+    const fugo   = state.players.find(p => pr[p.id] === 1);
+    const heimin = state.players.find(p => pr[p.id] === gameConfig.numPlayers - 2);
+    takeTopCards(daihinmin, daihugo, 2);
+    takeTopCards(heimin, fugo, 1);
+    render();
+    giveBack(daihugo, daihinmin, 2, () => {
+      giveBack(fugo, heimin, 1, () => { render(); callback(); });
     });
-  });
+  }
 }
 
 function takeTopCards(from, to, count) {
@@ -490,7 +511,7 @@ function giveBack(giver, receiver, count, callback) {
   if (giver.isHuman) {
     showEffectModal(
       `🔄 カード交換`,
-      `${RANK_NAMES[gameConfig.prevRanks[receiver.id]]}（${receiver.name}）に渡す ${count} 枚を選んでください`,
+      `${getRankName(gameConfig.prevRanks[receiver.id])}（${receiver.name}）に渡す ${count} 枚を選んでください`,
       [...giver.hand], count, (selected) => {
         selected.forEach(c => {
           giver.hand.splice(giver.hand.findIndex(x => x.id === c.id), 1);
@@ -677,6 +698,7 @@ function maxStrength(cards) {
 // 「最後に出し禁止」カードか判定（２、革命中は３、ジョーカーは常時）
 function isFinishForbiddenCard(card) {
   if (card.rank === 'JOKER') return true;
+  if (card.rank === '8') return true;
   const reversed = state.revolution !== state.elevenBack;
   return reversed ? card.rank === '3' : card.rank === '2';
 }
@@ -710,7 +732,7 @@ function playCards() {
   if (!canPlay(cards)) { setMessage('そのカードは出せません'); return; }
   if (isForbiddenFinish(state.currentPlayer, cards)) {
     const reversed = state.revolution !== state.elevenBack;
-    setMessage(`${reversed ? '３' : '２'}・ジョーカーでは上がれません！`);
+    setMessage(`８・${reversed ? '３' : '２'}・ジョーカーでは上がれません！`);
     return;
   }
   doPlay(state.currentPlayer, cards);
@@ -764,6 +786,7 @@ function doPlay(playerIdx, cards) {
     if (checkFinish(playerIdx)) return;
     render();
     const p = state.players[playerIdx];
+    if (p.finished) { nextTurn(); return; } // ♠3 で上がった → 次のプレイヤーへ
     if (p.isHuman) {
       enableActions(true);
       setMessage('♠3でジョーカーを撃破！もう一度あなたのターン');
@@ -818,7 +841,10 @@ function afterEffect(playerIdx, samePlayer) {
 // 現時点で使われていないランクのうち最上位（小さい数字）を返す
 function nextAvailableRankFromTop() {
   const used = new Set(state.players.filter(p => p.finished).map(p => p.rank));
-  return [0, 1, 2, 3].find(r => !used.has(r)) ?? 0;
+  for (let r = 0; r < state.players.length; r++) {
+    if (!used.has(r)) return r;
+  }
+  return 0;
 }
 
 function checkFinish(playerIdx) {
@@ -828,9 +854,9 @@ function checkFinish(playerIdx) {
   player.finished = true;
   player.rank = nextAvailableRankFromTop();   // ← 空きランクの最上位を割り当て
   state.finishRanks.push(playerIdx);
-  setMessage(`${player.name}が上がった！ → ${RANK_NAMES[player.rank]}`);
+  setMessage(`${player.name}が上がった！ → ${getRankName(player.rank)}`);
 
-  if (state.finishRanks.length >= 3) {
+  if (state.finishRanks.length >= state.players.length - 1) {
     const last = state.players.find(p => !p.finished);
     if (last) {
       last.finished = true;
@@ -854,8 +880,9 @@ function checkForbiddenStuck() {
   );
   if (stuck.length === 0) return false;
 
-  // 最下位（大貧民=3）から順に割り当て
-  const worstFirst = [3, 2, 1, 0];
+  // 最下位から順に割り当て（プレイヤー数に合わせる）
+  const numP = state.players.length;
+  const worstFirst = Array.from({ length: numP }, (_, i) => numP - 1 - i);
   stuck.forEach(player => {
     const used = new Set(state.players.filter(p => p.finished).map(p => p.rank));
     const rank = worstFirst.find(r => !used.has(r));
@@ -866,11 +893,10 @@ function checkForbiddenStuck() {
     state.finishRanks.push(player.id);
   });
 
-  const names = stuck.map(p => `${p.name}→${RANK_NAMES[p.rank]}`).join('、');
+  const names = stuck.map(p => `${p.name}→${getRankName(p.rank)}`).join('、');
   setMessage(`禁止カードのみ！ ${names} 確定`);
 
-  // 3人以上確定 → 残り1人のランクも確定してラウンド終了
-  if (state.finishRanks.length >= 3) {
+  if (state.finishRanks.length >= state.players.length - 1) {
     const last = state.players.find(p => !p.finished);
     if (last) {
       last.finished = true;
@@ -1272,6 +1298,7 @@ function playDiamond3Interrupt(playerIdx) {
   render();
 
   if (checkFinish(playerIdx)) return;
+  if (player.finished) { nextTurn(); return; } // ♦3 で上がった → 次のプレイヤーへ
 
   // ♦3 プレイヤーが空場でもう1ターン（8切りと同じ扱い）
   if (player.isHuman) {
@@ -1527,7 +1554,7 @@ function endRound() {
   // 今ラウンドの結果表示
   const roundResult = [...state.players]
     .sort((a, b) => a.rank - b.rank)
-    .map(p => `${RANK_NAMES[p.rank]}：${p.name}`)
+    .map(p => `${getRankName(p.rank)}：${p.name}`)
     .join('<br>');
 
   if (gameConfig.currentRound >= gameConfig.totalRounds) {
@@ -1551,7 +1578,7 @@ function endRound() {
 function showFinalResult() {
   const standings = [...state.players]
     .sort((a, b) => gameConfig.points[a.id] - gameConfig.points[b.id]);
-  const medals = ['🥇', '🥈', '🥉', ''];
+  const medals = ['🥇', '🥈', '🥉', '', ''];
   const lines = standings.map((p, i) =>
     `${medals[i]} ${p.name}（合計 ${gameConfig.points[p.id]} 点）`
   ).join('<br>');
@@ -1563,10 +1590,14 @@ function showFinalResult() {
   const btn = document.getElementById('overlay-action-btn');
   btn.textContent = 'もう一度';
   btn.onclick = () => {
-    gameConfig = { totalRounds: 1, currentRound: 0, points: [0,0,0,0], prevRanks: null };
+    gameConfig = { numPlayers: 4, totalRounds: 1, currentRound: 0, points: [0,0,0,0,0], prevRanks: null };
     document.getElementById('overlay-title').textContent = '監査大富豪';
     document.getElementById('overlay-result').textContent = '';
-    document.getElementById('round-selector').classList.remove('hidden');
+    // プレイヤー数選択に戻る
+    document.querySelectorAll('.player-btn').forEach(b => b.classList.remove('selected'));
+    document.getElementById('player-selector').classList.remove('hidden');
+    document.querySelectorAll('.round-btn').forEach(b => b.classList.remove('selected'));
+    document.getElementById('round-selector').classList.add('hidden');
     btn.classList.add('hidden');
     btn.onclick = overlayAction;
   };
@@ -1706,7 +1737,13 @@ function renderField() {
 }
 
 function renderCPUs() {
-  [1, 2, 3].forEach(i => {
+  [1, 2, 3, 4].forEach(i => {
+    const cpuEl = document.getElementById(`cpu${i}`);
+    if (i >= state.players.length) {
+      cpuEl.classList.add('hidden');
+      return;
+    }
+    cpuEl.classList.remove('hidden');
     const p = state.players[i];
     const handEl = document.getElementById(`cpu${i}-hand`);
     const countEl = document.getElementById(`cpu${i}-count`);
@@ -1724,12 +1761,11 @@ function renderCPUs() {
     playerEl.classList.toggle('stuck', p.stuck);
 
     // 親マーク
-    const isRoundStarter = state.roundStarter === i;
     const isTrickStarter = state.trickStarter === i;
     const labelEl = playerEl.querySelector('.cpu-label');
     const prevTitle = gameConfig.prevRanks
-      ? `(${RANK_NAMES[gameConfig.prevRanks[i]] ?? ''})` : '';
-    const parentMark = isRoundStarter ? ' 👑' : (isTrickStarter ? ' ◆' : '');
+      ? `(${getRankName(gameConfig.prevRanks[i])})` : '';
+    const parentMark = isTrickStarter ? ' ◆' : '';
     const finishMark = p.stuck ? ' [詰]' : (p.finished ? ' ✓' : '');
     labelEl.textContent = `CPU${i}${prevTitle}${parentMark}${finishMark}`;
   });
@@ -1739,9 +1775,8 @@ function renderPlayerArea() {
   const el = document.getElementById('player-area');
   el.classList.toggle('active-turn', state.currentPlayer === 0 && !state.gameOver);
 
-  const isRoundStarter = state.roundStarter === 0;
   const isTrickStarter = state.trickStarter === 0;
-  const parentMark = isRoundStarter ? ' 👑' : (isTrickStarter ? ' ◆' : '');
+  const parentMark = isTrickStarter ? ' ◆' : '';
   const player = state.players[0];
   const finishMark = player.stuck ? ' [詰]' : (player.finished ? ' ✓' : '');
   document.getElementById('player-label').textContent = `あなた${parentMark}${finishMark}`;

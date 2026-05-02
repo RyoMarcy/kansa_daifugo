@@ -100,6 +100,7 @@ body {
 /* CPU エリア */
 #cpu-area {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
   flex-shrink: 0;
@@ -338,6 +339,28 @@ button:disabled {
 #overlay-action-btn:hover {
   background: #e67e22;
 }
+
+/* プレイヤー数選択 */
+#player-btns {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.player-btn {
+  padding: 12px 28px;
+  font-size: 20px;
+  font-weight: bold;
+  background: #2c5f4a;
+  color: #fff;
+  border: 2px solid #aaa;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  min-width: 80px;
+}
+.player-btn:hover  { background: #3a7a60; border-color: #ffd700; }
+.player-btn.selected { background: #f39c12; border-color: #ffd700; }
 
 /* 周回選択 */
 .round-selector-label {

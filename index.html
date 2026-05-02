@@ -68,7 +68,7 @@
           <div class="help-row"><span class="help-badge" style="background:#555">🃏 グループ</span><span>同ランクカードの代わりとして枚数合わせに使える。スート縛り1つ補填</span></div>
           <div class="help-row"><span class="help-badge" style="background:#555">🃏 階段</span><span>階段の穴埋めに使える（1枚のみ）。そのランクの効果も発揮する</span></div>
           <div class="help-section-title">── 禁止上がり ──</div>
-          <div class="help-row"><span class="help-badge" style="background:#c0392b">禁止</span><span>通常時は2・ジョーカー、革命時は3・ジョーカーで上がれない（[詰]扱い）</span></div>
+          <div class="help-row"><span class="help-badge" style="background:#c0392b">禁止</span><span>8・ジョーカーは常に上がり禁止。通常時は2も禁止、革命時は3も禁止（[詰]扱い）</span></div>
         </div>
       </div>
     </div>
@@ -97,6 +97,11 @@
         <div class="cpu-label">CPU3</div>
         <div class="cpu-hand" id="cpu3-hand"></div>
         <div class="cpu-count" id="cpu3-count"></div>
+      </div>
+      <div class="cpu-player hidden" id="cpu4">
+        <div class="cpu-label">CPU4</div>
+        <div class="cpu-hand" id="cpu4-hand"></div>
+        <div class="cpu-count" id="cpu4-count"></div>
       </div>
     </div>
 
@@ -138,8 +143,17 @@
       <div id="overlay-content">
         <h2 id="overlay-title">監査大富豪</h2>
         <div id="overlay-result"></div>
+        <!-- プレイヤー数選択 -->
+        <div id="player-selector">
+          <p class="round-selector-label">何人でプレイしますか？</p>
+          <div id="player-btns">
+            <button class="player-btn" onclick="selectPlayers(3)">3人</button>
+            <button class="player-btn" onclick="selectPlayers(4)">4人</button>
+            <button class="player-btn" onclick="selectPlayers(5)">5人</button>
+          </div>
+        </div>
         <!-- 周回選択 -->
-        <div id="round-selector">
+        <div id="round-selector" class="hidden">
           <p class="round-selector-label">何周プレイしますか？</p>
           <div id="round-btns">
             <button class="round-btn" onclick="selectRounds(1)">1周</button>
