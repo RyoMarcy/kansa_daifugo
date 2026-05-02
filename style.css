@@ -103,7 +103,9 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  flex-shrink: 0;
+  flex-shrink: 1;   /* 画面が狭いとき縮む（手札エリアを押し出さない） */
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cpu-player {
@@ -114,6 +116,8 @@ body {
   max-width: 200px;
   text-align: center;
   transition: box-shadow 0.3s;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cpu-player.active-turn {
@@ -179,16 +183,15 @@ body {
 
 #player-hand {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;           /* 常に1行・横スクロール（高さを固定して押し出し防止） */
   gap: 4px;
-  /* 枚数が多いとき横スクロール可能にする */
   overflow-x: auto;
   overflow-y: visible;
-  padding-bottom: 4px; /* スクロールバー/選択浮き上がり用 */
+  padding-bottom: 4px;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: none; /* Firefox */
+  scrollbar-width: none;
 }
-#player-hand::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+#player-hand::-webkit-scrollbar { display: none; }
 
 /* カード */
 .card {
@@ -753,24 +756,23 @@ button:disabled {
   margin-top: 1px;
 }
 
-/* ===================== スマホ縦画面コンパクト ===================== */
-@media (max-height: 750px) {
+/* ===================== スマホ縦画面コンパクト（iPhone 12/14 等含む） ===================== */
+@media (max-height: 900px) {
   #app { gap: 4px; padding: 4px; }
 
   #status-bar { min-height: 32px; padding: 5px 10px; }
   #game-message { font-size: 13px; }
-  #rank-display  { font-size: 11px; }
 
-  #field { min-height: 72px; padding: 6px; }
+  #field { min-height: 68px; padding: 6px; }
   #field-info { font-size: 11px; }
   #revolution-badge { font-size: 11px; padding: 2px 8px; }
   #lock-display { font-size: 11px; }
 
   #cpu-area { gap: 4px; }
-  .cpu-player { padding: 5px 8px; }
-  .cpu-label  { font-size: 11px; }
-  .cpu-count  { font-size: 10px; }
-  .cpu-card-back { width: 18px; height: 28px; }
+  .cpu-player { padding: 4px 8px; }
+  .cpu-label  { font-size: 11px; margin-bottom: 2px; }
+  .cpu-count  { font-size: 10px; margin-top: 2px; }
+  .cpu-card-back { width: 16px; height: 24px; }
 
   /* プレイヤーエリア：手札上・ボタン下の縦並び */
   #player-area {
@@ -778,10 +780,6 @@ button:disabled {
     align-items: stretch;
     gap: 6px;
     padding: 6px;
-  }
-  #player-hand {
-    flex-wrap: nowrap;    /* 1行横スクロールに切り替え */
-    padding-bottom: 2px;
   }
   #player-label { font-size: 11px; margin-bottom: 4px; }
 
@@ -804,4 +802,24 @@ button:disabled {
   .card.selected { transform: translateY(-10px); }
   .field-card { width: 36px; height: 52px; }
   .effect-badge { font-size: 6px; }
+}
+
+/* ===================== 小型スマホ（iPhone SE 等）超コンパクト ===================== */
+@media (max-height: 680px) {
+  #app { gap: 2px; padding: 3px; }
+
+  #status-bar { min-height: 28px; padding: 3px 8px; }
+  #game-message { font-size: 12px; }
+
+  #field { min-height: 56px; padding: 4px; }
+
+  .cpu-card-back { width: 14px; height: 20px; }
+  .cpu-player { padding: 3px 6px; }
+
+  .card { width: 38px; height: 56px; }
+  .card-suit { font-size: 13px; }
+  .card-rank { font-size: 10px; }
+  .field-card { width: 32px; height: 46px; }
+
+  #action-area button { padding: 6px 16px; font-size: 13px; }
 }
