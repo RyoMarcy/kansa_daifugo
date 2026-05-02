@@ -994,7 +994,9 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
             highlightNewCards(selected);
             if (selected.length > 0) setMessage(`${selected.length}枚を手札に戻した！`);
             render(); done(false);
-          }
+          },
+          false,
+          [...player.hand]  // 参照用手札
         );
       } else {
         // 手札が空になった（上がり）場合は効果を発動しない
@@ -1573,7 +1575,7 @@ function showFinalResult() {
 }
 
 // ===================== エフェクトモーダル =====================
-function showEffectModal(title, desc, cards, maxCount, callback, exact = false) {
+function showEffectModal(title, desc, cards, maxCount, callback, exact = false, refCards = null) {
   effectCallback = callback;
   effectSelectedIds = [];
   effectMaxCount = maxCount;
@@ -1582,6 +1584,30 @@ function showEffectModal(title, desc, cards, maxCount, callback, exact = false) 
 
   document.getElementById('effect-modal-title').textContent = title;
   document.getElementById('effect-modal-desc').textContent = desc;
+
+  // 参照用手札（死者蘇生など）
+  const refEl = document.getElementById('effect-modal-ref');
+  const refCardsEl = document.getElementById('effect-modal-ref-cards');
+  refCardsEl.innerHTML = '';
+  if (refCards && refCards.length > 0) {
+    refCards.forEach(card => {
+      const el = makeCardEl(card, true); // field-card サイズ（小）
+      el.style.cursor = 'default';
+      el.style.pointerEvents = 'none';
+      const effectInfo = card.rank === '3' ? SUIT3_EFFECTS[card.suit] : EFFECT_INFO[card.rank];
+      if (effectInfo) {
+        const badge = document.createElement('div');
+        badge.className = 'effect-badge';
+        badge.textContent = effectInfo.name;
+        badge.style.background = effectInfo.color;
+        el.appendChild(badge);
+      }
+      refCardsEl.appendChild(el);
+    });
+    refEl.classList.remove('hidden');
+  } else {
+    refEl.classList.add('hidden');
+  }
 
   const cardsEl = document.getElementById('effect-modal-cards');
   cardsEl.innerHTML = '';

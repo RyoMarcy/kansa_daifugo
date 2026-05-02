@@ -491,6 +491,25 @@ button:disabled {
   justify-content: center;
 }
 
+#effect-modal-ref-label {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+#effect-modal-ref-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+#effect-modal-divider {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.15);
+  margin: 0 0 12px;
+}
 #effect-modal-footer {
   display: flex;
   align-items: center;
