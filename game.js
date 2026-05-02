@@ -64,6 +64,45 @@ function highlightNewCards(cards) {
   }, 2500);
 }
 
+// ===================== ゲームログ =====================
+let gameLog = [];
+
+function addLog(msg) {
+  if (!msg) return;
+  // 単純なターン通知・交換中メッセージはスキップ
+  if (msg === 'あなたのターンです') return;
+  if (/^.+のターンです$/.test(msg)) return;
+  if (msg === 'カード交換中…') return;
+  if (/^.+がカードを出した/.test(msg)) return; // doPlay側で詳細ログを出す
+  gameLog.push(msg);
+}
+
+function toggleLog() {
+  const modal = document.getElementById('log-modal');
+  modal.classList.toggle('hidden');
+  if (!modal.classList.contains('hidden')) renderLog();
+}
+
+function renderLog() {
+  const el = document.getElementById('log-modal-body');
+  el.innerHTML = '';
+  if (gameLog.length === 0) {
+    const d = document.createElement('div');
+    d.className = 'log-empty';
+    d.textContent = 'まだログがありません';
+    el.appendChild(d);
+    return;
+  }
+  [...gameLog].reverse().forEach(entry => {
+    const d = document.createElement('div');
+    d.className = entry.startsWith('===') ? 'log-round-marker'
+                : entry.includes('リセット') ? 'log-reset'
+                : 'log-entry';
+    d.textContent = entry;
+    el.appendChild(d);
+  });
+}
+
 // ===================== エフェクトモーダル =====================
 let effectCallback = null;
 let effectSelectedIds = [];
@@ -90,6 +129,7 @@ function shuffle(arr) {
 }
 
 function cardValue(card) {
+  if (card.rank === 'JOKER') return 16; // 革命・11バック中も常に最強
   const v = RANK_ORDER[card.rank];
   const reversed = state.revolution !== state.elevenBack;
   return reversed ? (17 - v) : v;
@@ -354,6 +394,8 @@ function overlayAction() {
 // ===================== ラウンド開始 =====================
 function startRound() {
   gameConfig.currentRound++;
+  gameLog = [];
+  addLog(`=== ラウンド ${gameConfig.currentRound} / ${gameConfig.totalRounds} ===`);
   const deck = shuffle(createDeck());
 
   state = {
@@ -527,11 +569,13 @@ function isCardPotentiallyPlayable(card) {
 
   // ---- 場が電撃の場合 ----
   if (isElectric(state.field)) {
+    if (state.suitLock.length > 0 && !state.suitLock.includes(card.suit)) return false;
     return canBeInElectric(card, hand, fieldLen, fldStrength, getElectricDiff(state.field));
   }
 
   // ---- 場が階段の場合 ----
   if (isSequence(state.field)) {
+    if (state.suitLock.length > 0 && !state.suitLock.includes(card.suit)) return false;
     return canBeInSequence(card, hand, fieldLen, fldStrength);
   }
 
@@ -681,6 +725,11 @@ function doPlay(playerIdx, cards) {
   const player = state.players[playerIdx];
   enableActions(false);
 
+  // ログ：誰が何を出したか
+  const cardStr = cards.map(c => c.rank === 'JOKER' ? '🃏' : c.suit + c.rank).join(' ');
+  const typeLabel = isSequence(cards) ? ' [階段]' : isElectric(cards) ? ' [電撃]' : '';
+  addLog(`▶ ${player.name}：${cardStr}${typeLabel}`);
+
   const prevField = [...state.field];
   // 場が空→このプレイヤーがトリック親
   if (prevField.length === 0) state.trickStarter = playerIdx;
@@ -701,7 +750,9 @@ function doPlay(playerIdx, cards) {
   const isElecRev  = isElectric(cards) && cards.length >= 4;
   if (isGroupRev || isSeqRev || isElecRev) {
     state.revolution = !state.revolution;
-    showBadgeFlash('革命' + (state.revolution ? '発動！' : '解除！'));
+    const revMsg = '🔄 革命' + (state.revolution ? '発動！' : '解除！');
+    showBadgeFlash(revMsg);
+    addLog(revMsg);
   }
 
   // 特例：♠3 が単体ジョーカーを倒した → 場を流して続行
@@ -904,8 +955,11 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
   if (rank === '3') {
     const suit3 = nonJokers[0]?.suit;
     if (suit3 === '♣') {
-      // ♣3 リセット：場への配置は doPlay 済み。通知のみ
+      // ♣3 リセット：縛りをすべて解除
+      state.numberLock = null;
+      state.suitLock = [];
       showEffectNotice('リセット！', '#795548');
+      render();
       done(false);
       return;
     }
@@ -1103,6 +1157,18 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
     }
     case 'J': {
       state.elevenBack = !state.elevenBack;
+      // elevenBack 反転後に numberLock を再計算する
+      // （反転前の強さ順で決めたロックランクが無効になるため）
+      if (state.numberLock) {
+        const fldRank = getMainRank(state.field);
+        if (fldRank) {
+          const newFldVal = cardValue({ rank: fldRank }); // 反転後の強さ
+          const nextStrength = newFldVal + 1;
+          const reversed = state.revolution !== state.elevenBack;
+          const nextBase = reversed ? (17 - nextStrength) : nextStrength;
+          state.numberLock = RANK_BY_VAL[nextBase] || null;
+        }
+      }
       setMessage(`${player.name}がイレブンバック！この場の強弱が逆転！`);
       render(); done(false); break;
     }
@@ -1496,7 +1562,7 @@ function showFinalResult() {
   btn.textContent = 'もう一度';
   btn.onclick = () => {
     gameConfig = { totalRounds: 1, currentRound: 0, points: [0,0,0,0], prevRanks: null };
-    document.getElementById('overlay-title').textContent = '大富豪';
+    document.getElementById('overlay-title').textContent = '監査大富豪';
     document.getElementById('overlay-result').textContent = '';
     document.getElementById('round-selector').classList.remove('hidden');
     btn.classList.add('hidden');
@@ -1577,6 +1643,7 @@ function enableActions(enabled) {
 
 function setMessage(msg) {
   document.getElementById('game-message').textContent = msg;
+  addLog(msg);
 }
 
 function updateRoundIndicator() {

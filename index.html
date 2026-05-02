@@ -7,8 +7,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="大富豪">
-  <title>大富豪</title>
+  <meta name="apple-mobile-web-app-title" content="監査大富豪">
+  <title>監査大富豪</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="style.css">
@@ -20,7 +20,19 @@
       <div id="game-message">大富豪へようこそ！</div>
       <div style="display:flex;align-items:center;gap:8px;">
         <div id="round-indicator"></div>
+        <button id="log-btn"  onclick="toggleLog()"  title="ゲームログ">📋</button>
         <button id="help-btn" onclick="toggleHelp()" title="カード効果一覧">ℹ</button>
+      </div>
+    </div>
+
+    <!-- ログモーダル -->
+    <div id="log-modal" class="hidden">
+      <div id="log-modal-box">
+        <div id="log-modal-header">
+          <span>ゲームログ（今周）</span>
+          <button onclick="toggleLog()">✕</button>
+        </div>
+        <div id="log-modal-body"></div>
       </div>
     </div>
 
@@ -119,7 +131,7 @@
     <!-- ゲーム開始/終了オーバーレイ -->
     <div id="overlay" class="hidden">
       <div id="overlay-content">
-        <h2 id="overlay-title">大富豪</h2>
+        <h2 id="overlay-title">監査大富豪</h2>
         <div id="overlay-result"></div>
         <!-- 周回選択 -->
         <div id="round-selector">

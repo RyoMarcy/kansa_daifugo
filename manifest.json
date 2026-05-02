@@ -1,7 +1,7 @@
 {
-  "name": "大富豪",
-  "short_name": "大富豪",
-  "description": "特殊効果カードあり！大富豪カードゲーム",
+  "name": "監査大富豪",
+  "short_name": "監査大富豪",
+  "description": "特殊効果カードあり！監査大富豪カードゲーム",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait",
