@@ -821,6 +821,8 @@ function doPass(playerIdx) {
   if (state.passCount >= activePlayers - 1) {
     resetField();
     setMessage('場をリセット！');
+    // 場リセット後に残り全員が詰んでいればラウンド終了
+    if (checkAllStuck()) return;
   }
   render();
   nextTurn();
@@ -869,21 +871,22 @@ function checkFinish(playerIdx) {
   return false;
 }
 
-// 手札が禁止上がりカードのみのプレイヤーを下位ランクから確定させる
-function checkForbiddenStuck() {
-  // 手札が残り1枚でそれが禁止カードのときだけ確定する
-  // （複数枚ある場合は他を先に出せる可能性があるため確定しない）
-  const stuck = state.players.filter(p =>
-    !p.finished &&
-    p.hand.length === 1 &&
-    isFinishForbiddenCard(p.hand[0])
-  );
-  if (stuck.length === 0) return false;
+// プレイヤーが「禁止上がりカードのみ」で詰んでいるか（表示・終了判定に使う）
+function isPlayerStuck(player) {
+  return !player.finished &&
+         player.hand.length > 0 &&
+         player.hand.every(c => isFinishForbiddenCard(c));
+}
 
-  // 最下位から順に割り当て（プレイヤー数に合わせる）
+// 残り全員が詰んでいるとき下位ランクから確定してラウンド終了
+function checkAllStuck() {
+  const active = state.players.filter(p => !p.finished);
+  if (active.length === 0) return false;
+  if (!active.every(p => isPlayerStuck(p))) return false;
+
   const numP = state.players.length;
   const worstFirst = Array.from({ length: numP }, (_, i) => numP - 1 - i);
-  stuck.forEach(player => {
+  active.forEach(player => {
     const used = new Set(state.players.filter(p => p.finished).map(p => p.rank));
     const rank = worstFirst.find(r => !used.has(r));
     if (rank === undefined) return;
@@ -893,27 +896,14 @@ function checkForbiddenStuck() {
     state.finishRanks.push(player.id);
   });
 
-  const names = stuck.map(p => `${p.name}→${getRankName(p.rank)}`).join('、');
-  setMessage(`禁止カードのみ！ ${names} 確定`);
-
-  if (state.finishRanks.length >= state.players.length - 1) {
-    const last = state.players.find(p => !p.finished);
-    if (last) {
-      last.finished = true;
-      last.rank = nextAvailableRankFromTop();
-      state.finishRanks.push(last.id);
-    }
-    render();
-    endRound();
-    return true;
-  }
-
+  const names = active.map(p => `${p.name}→${getRankName(p.rank)}`).join('、');
+  setMessage(`全員詰み！ ${names} 確定`);
   render();
-  return false;
+  endRound();
+  return true;
 }
 
 function nextTurn() {
-  if (checkForbiddenStuck()) return;
   const fivePlayer = state.currentPlayer; // 5を出したプレイヤー（全員スキップ時に戻る）
   let next = getNextActivePlayer(state.currentPlayer);
   while (state.skipNext > 0) {
@@ -981,9 +971,10 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
   if (rank === '3') {
     const suit3 = nonJokers[0]?.suit;
     if (suit3 === '♣') {
-      // ♣3 リセット：縛りをすべて解除
+      // ♣3 リセット：縛り＋11バックを解除（革命はそのまま）
       state.numberLock = null;
       state.suitLock = [];
+      state.elevenBack = false;
       showEffectNotice('リセット！', '#795548');
       render();
       done(false);
@@ -1757,8 +1748,9 @@ function renderCPUs() {
     }
     countEl.textContent = `${p.hand.length}枚`;
     playerEl.classList.toggle('active-turn', state.currentPlayer === i && !state.gameOver);
+    const stuck = isPlayerStuck(p);
     playerEl.classList.toggle('finished', p.finished);
-    playerEl.classList.toggle('stuck', p.stuck);
+    playerEl.classList.toggle('stuck', stuck);
 
     // 親マーク
     const isTrickStarter = state.trickStarter === i;
@@ -1766,7 +1758,7 @@ function renderCPUs() {
     const prevTitle = gameConfig.prevRanks
       ? `(${getRankName(gameConfig.prevRanks[i])})` : '';
     const parentMark = isTrickStarter ? ' ◆' : '';
-    const finishMark = p.stuck ? ' [詰]' : (p.finished ? ' ✓' : '');
+    const finishMark = stuck ? ' [詰]' : (p.finished ? ' ✓' : '');
     labelEl.textContent = `CPU${i}${prevTitle}${parentMark}${finishMark}`;
   });
 }
@@ -1778,7 +1770,7 @@ function renderPlayerArea() {
   const isTrickStarter = state.trickStarter === 0;
   const parentMark = isTrickStarter ? ' ◆' : '';
   const player = state.players[0];
-  const finishMark = player.stuck ? ' [詰]' : (player.finished ? ' ✓' : '');
+  const finishMark = isPlayerStuck(player) ? ' [詰]' : (player.finished ? ' ✓' : '');
   document.getElementById('player-label').textContent = `あなた${parentMark}${finishMark}`;
 }
 
