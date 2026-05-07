@@ -565,6 +565,31 @@ button:disabled {
 
 .hidden { display: none !important; }
 
+/* ===================== レイアウト切替ボタン ===================== */
+#layout-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.4);
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+#layout-btn:hover { background: rgba(255,255,255,0.32); }
+#layout-btn.active { background: rgba(255,215,0,0.35); border-color: #ffd700; color: #ffd700; }
+
+/* 折り返しモード（旧レイアウト） */
+#app.layout-wrap #player-hand {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
 /* ===================== ログボタン ===================== */
 #log-btn {
   width: 28px;

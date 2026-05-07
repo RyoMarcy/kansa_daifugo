@@ -380,6 +380,16 @@ function updateLocks(prevField, newCards) {
   }
 }
 
+// ===================== レイアウト切替 =====================
+function toggleLayout() {
+  const app = document.getElementById('app');
+  const btn = document.getElementById('layout-btn');
+  const isWrap = app.classList.toggle('layout-wrap');
+  btn.textContent = isWrap ? '1行' : '折';
+  btn.classList.toggle('active', isWrap);
+  localStorage.setItem('daifugo-layout-wrap', isWrap ? '1' : '0');
+}
+
 // ===================== ヘルプモーダル =====================
 function toggleHelp() {
   document.getElementById('help-modal').classList.toggle('hidden');
@@ -1843,7 +1853,6 @@ function makeCardEl(card, small) {
 // ===================== 初期表示 =====================
 window.onload = () => {
   // iOS Safari: visualViewport で実際の可視高さを CSS 変数にセット
-  // （ツールバーの表示/非表示に追従して再計算）
   function updateVh() {
     const h = (window.visualViewport?.height ?? window.innerHeight) + 'px';
     document.documentElement.style.setProperty('--actual-vh', h);
@@ -1851,6 +1860,14 @@ window.onload = () => {
   updateVh();
   window.visualViewport?.addEventListener('resize', updateVh);
   window.addEventListener('resize', updateVh);
+
+  // 保存済みのレイアウト設定を復元
+  if (localStorage.getItem('daifugo-layout-wrap') === '1') {
+    document.getElementById('app').classList.add('layout-wrap');
+    const btn = document.getElementById('layout-btn');
+    btn.textContent = '1行';
+    btn.classList.add('active');
+  }
 
   document.getElementById('overlay').classList.remove('hidden');
 };
