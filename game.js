@@ -381,12 +381,27 @@ function updateLocks(prevField, newCards) {
 }
 
 // ===================== レイアウト切替 =====================
+function applyLayout(isWrap) {
+  const hand = document.getElementById('player-hand');
+  if (!hand) return;
+  if (isWrap) {
+    hand.style.flexWrap = 'wrap';
+    hand.style.overflowX = 'visible';
+    hand.style.overflowY = 'visible';
+  } else {
+    hand.style.flexWrap = 'nowrap';
+    hand.style.overflowX = 'auto';
+    hand.style.overflowY = 'visible';
+  }
+}
+
 function toggleLayout() {
   const app = document.getElementById('app');
   const btn = document.getElementById('layout-btn');
   const isWrap = app.classList.toggle('layout-wrap');
   btn.textContent = isWrap ? '1行' : '折';
   btn.classList.toggle('active', isWrap);
+  applyLayout(isWrap);
   localStorage.setItem('daifugo-layout-wrap', isWrap ? '1' : '0');
 }
 
@@ -1028,7 +1043,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
       } else {
         // 手札が空になった（上がり）場合は効果を発動しない
         if (player.hand.length === 0) { done(false); return; }
-        const picks = [...pickable].sort((a,b) => RANK_ORDER[b.rank]-RANK_ORDER[a.rank]).slice(0, 1);
+        const picks = [...pickable].sort((a,b) => cardValue(b)-cardValue(a)).slice(0, 1);
         picks.forEach(c => { state.discardPile.splice(state.discardPile.findIndex(x=>x.id===c.id),1); player.hand.push(c); });
         sortHand(player.hand);
         setMessage(`${player.name}が捨て札から ${picks.length} 枚回収！`);
@@ -1067,7 +1082,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
           }
         );
       } else {
-        const gives = [...player.hand].sort((a,b)=>RANK_ORDER[a.rank]-RANK_ORDER[b.rank]).slice(0, maxGive);
+        const gives = [...player.hand].sort((a,b)=>cardValue(a)-cardValue(b)).slice(0, maxGive);
         gives.forEach(c => { player.hand.splice(player.hand.findIndex(x=>x.id===c.id),1); target.hand.push(c); });
         sortHand(target.hand);
         if (target.isHuman) highlightNewCards(gives);
@@ -1095,7 +1110,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
             cardsToGive = null; // placeholder
           } else {
             cardsToGive = [...p.hand]
-              .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank])
+              .sort((a, b) => cardValue(a) - cardValue(b))
               .slice(0, Math.min(k, p.hand.length));
           }
           return { cardsToGive, receiverIdx, giverId: p.id };
@@ -1149,7 +1164,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
       } else {
         // CPUが宣言：最弱カードをmaxN枚選んでKを決定
         const cpuGives = [...player.hand]
-          .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank])
+          .sort((a, b) => cardValue(a) - cardValue(b))
           .slice(0, Math.min(maxN, player.hand.length));
         executeAll(cpuGives.length, cpuGives);
       }
@@ -1177,7 +1192,7 @@ function handleSpecialEffect(playerIdx, cards, rank, nonJokers, done) {
           }
         );
       } else {
-        const discards = [...player.hand].sort((a,b)=>RANK_ORDER[a.rank]-RANK_ORDER[b.rank]).slice(0, maxDiscard);
+        const discards = [...player.hand].sort((a,b)=>cardValue(a)-cardValue(b)).slice(0, maxDiscard);
         discards.forEach(c => { player.hand.splice(player.hand.findIndex(x=>x.id===c.id),1); state.discardPile.push(c); });
         setMessage(`${player.name}が ${discards.length} 枚を捨てた！`);
         render(); done(false);
@@ -1235,7 +1250,7 @@ function handleHeart3Gift(playerIdx, done) {
     // 手札が空になった（上がり）場合は効果を発動しない
     if (player.hand.length === 0) { done(false); return; }
     // CPU：最強カードを自分の手札に
-    const picked = [...state.discardPile].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])[0];
+    const picked = [...state.discardPile].sort((a, b) => cardValue(b) - cardValue(a))[0];
     state.discardPile.splice(state.discardPile.findIndex(x => x.id === picked.id), 1);
     player.hand.push(picked);
     sortHand(player.hand);
@@ -1452,7 +1467,7 @@ function findPlayableFromEmpty(hand) {
     if (!groups[c.rank]) groups[c.rank] = [];
     groups[c.rank].push(c);
   });
-  const sorted = Object.entries(groups).sort((a, b) => RANK_ORDER[a[0]] - RANK_ORDER[b[0]]);
+  const sorted = Object.entries(groups).sort((a, b) => cardValue({rank: a[0]}) - cardValue({rank: b[0]}));
   for (const [, cards] of sorted) {
     const group = [...cards, ...jokers].slice(0, 4);
     if (group.length >= 2) return group;
@@ -1469,7 +1484,8 @@ function findPlayableFromEmpty(hand) {
     }
   }
 
-  return [candidates[0]];
+  const sorted2 = candidates.filter(c => c.rank !== 'JOKER').sort((a, b) => cardValue(a) - cardValue(b));
+  return [sorted2.length > 0 ? sorted2[0] : candidates[0]];
 }
 
 function findPlayable(hand, count) {
@@ -1816,6 +1832,9 @@ function renderPlayerHand() {
     }
     el.appendChild(cardEl);
   });
+  // レイアウト設定を再適用（render() で innerHTML が更新されても設定が保たれる）
+  const isWrap = document.getElementById('app').classList.contains('layout-wrap');
+  applyLayout(isWrap);
 }
 
 function renderStatusBadges() {
@@ -1867,6 +1886,7 @@ window.onload = () => {
     const btn = document.getElementById('layout-btn');
     btn.textContent = '1行';
     btn.classList.add('active');
+    applyLayout(true);
   }
 
   document.getElementById('overlay').classList.remove('hidden');

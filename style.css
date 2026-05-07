@@ -599,6 +599,12 @@ button:disabled {
 #app.layout-wrap #player-hand {
   flex-wrap: wrap;
   overflow-x: visible;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: auto;
+}
+
+#app.layout-wrap #player-hand-area {
+  overflow: visible;
 }
 
 /* ===================== ログボタン ===================== */
